@@ -5,11 +5,9 @@ extern crate argparse;
 
 mod rapidtar;
 
-use argparse::{ArgumentParser, Store, StoreFalse, StoreTrue};
-use std::{io, fs, thread, path};
-use std::io::prelude::*;
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rayon::{Scope, ThreadPoolBuilder};
+use argparse::{ArgumentParser, Store};
+use std::{io, fs, thread};
+use std::sync::mpsc::{sync_channel, Receiver};
 use rapidtar::{tar, traverse};
 
 fn main() -> io::Result<()> {
@@ -26,6 +24,8 @@ fn main() -> io::Result<()> {
         
         ap.refer(&mut basepath).add_argument("basepath", Store, "The directory whose contents should be archived");
         ap.refer(&mut outfile).add_argument("outfile", Store, "The file to write the archive to");
+        ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
+        ap.refer(&mut parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
         
         ap.parse_args_or_exit();
     }
@@ -43,35 +43,9 @@ fn main() -> io::Result<()> {
         println!("Started");
         
         while let Ok(entry) = reciever.recv() {
-            match entry.tarheader {
-                Ok(tarheader) => {
-                    //eprintln!("{:?}", entry.path);
-                    tarball.write(&tarheader);
-                    if !entry.filedata_in_header {
-                        //Stream the file into the tarball.
-                        //TODO: Determine the performance impact of letting
-                        //small files queue up vs doing all the large files all
-                        //at once at the end of the archive
-                        let source_file = fs::File::open(entry.path.as_ref());
-                        
-                        match source_file {
-                            Ok(mut source_file) => {
-                                let data_written = io::copy(&mut source_file, &mut tarball);
-                                
-                                match data_written {
-                                    Ok(written_size) => {
-                                        if written_size != entry.expected_data_size {
-                                            eprintln!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", entry.path, (entry.expected_data_size - written_size));
-                                        }
-                                    },
-                                    Err(x) => eprintln!("{:?}\n", x)
-                                }
-                            },
-                            Err(x) => eprintln!("{:?}\n", x)
-                        }
-                    }
-                }
-                Err(x) => eprintln!("{:?}\n", x)
+            match tar::serialize(&entry, &mut tarball) {
+                Ok(_) => {},
+                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.path, e)
             }
         }
 
@@ -80,7 +54,7 @@ fn main() -> io::Result<()> {
     
     rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit).build().unwrap().scope(move |s| {
         traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender)
-    });
+    }).unwrap();
     
     Ok(())
 }

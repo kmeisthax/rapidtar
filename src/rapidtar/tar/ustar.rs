@@ -63,7 +63,7 @@ fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
 fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
     match dirtime.duration_since(time::UNIX_EPOCH) {
         Ok(unix_duration) => format_tar_numeral(unix_duration.as_secs(), 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar numeral too large")),
-        Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, "File older than UNIX")) //TODO: Negative time
+        Err(_) => Err(io::Error::new(io::ErrorKind::InvalidData, "File older than UNIX")) //TODO: Negative time
     }
 }
 
@@ -81,7 +81,7 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
-fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
+fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
     //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
     let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
     let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
@@ -105,11 +105,9 @@ fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
     relapath_encoded.push(0);
     
     if relapath_encoded.len() <= 100 {
-        let padding = relapath_encoded.capacity() - relapath_encoded.len();
-        
         relapath_encoded.resize(100, 0);
         
-        return Ok((relapath_encoded, vec![0; 155], false));
+        return Ok((relapath_encoded, vec![0; 155]));
     }
     
     //Find a good spot to split the path.
@@ -131,7 +129,7 @@ fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
             } else {
                 relapath_encoded.resize(155, 0);
 
-                return Ok((oldname_part, relapath_encoded, false))
+                return Ok((oldname_part, relapath_encoded))
             }
         }
     }
@@ -140,7 +138,7 @@ fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
     if relapath_encoded.len() < 155 {
         relapath_encoded.resize(155, 0);
         
-        return Ok((vec![0;100], relapath_encoded, false));
+        return Ok((vec![0;100], relapath_encoded));
     }
     
     //omfg i cant even, literally
@@ -179,7 +177,7 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
     
     let metadata = dirent.metadata()?;
     
-    let (relapath_unix, relapath_extended, is_too_large) = format_tar_filename(&dirent.path(), basepath)?;
+    let (relapath_unix, relapath_extended) = format_tar_filename(&dirent.path(), basepath)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -207,7 +205,7 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::{format_tar_numeral, format_gnu_numeral, format_tar_filename};
+    use rapidtar::tar::{format_tar_numeral, format_tar_string, format_tar_filename};
     use std::{io, path};
     
     #[test]
@@ -224,6 +222,13 @@ mod tests {
             Some(x) => false,
             None => true
         });
+    }
+    
+    #[test]
+    fn format_tar_string_32() {
+        let formatted = format_tar_string("root", 32).unwrap();
+        assert_eq!("root".as_bytes(), &formatted[0..4]);
+        assert_eq!(vec![0 as u8; 28], &formatted[4..]);
     }
     
     #[test]

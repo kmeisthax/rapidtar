@@ -41,13 +41,19 @@ pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::Trave
                 let file = fs::File::open(entry.path());
 
                 if let Ok(mut file) = file {
-                    //TODO: Error handling. If a read fails we should replace the tarheader with the error.
-                    let actually_read = file.read_to_end(&mut tardata);
-                    filedata_in_header = true;
-
-                    let padding_needed = tardata.len() % 512;
-                    if padding_needed != 0 {
-                        tardata.extend(vec![0; 512 - padding_needed]);
+                    match file.read_to_end(&mut tardata) {
+                        Ok(_) => {
+                            //TODO: What about a short read?
+                            filedata_in_header = true;
+                            
+                            let padding_needed = tardata.len() % 512;
+                            if padding_needed != 0 {
+                                tardata.extend(vec![0; 512 - padding_needed]);
+                            }
+                        },
+                        Err(_) => {
+                            //Do nothing. Serializer thread can retry it.
+                        }
                     }
                 }
             }
@@ -62,4 +68,28 @@ pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::Trave
                     expected_data_size: expected_data_size,
                     tarheader: tarheader,
                     filedata_in_header: filedata_in_header}
+}
+
+pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write) -> io::Result<()> {
+    match traversal.tarheader {
+        Ok(ref header) => {
+            tarball.write_all(&header)?;
+            
+            if !traversal.filedata_in_header {
+                //Stream the file into the tarball.
+                //TODO: Determine the performance impact of letting
+                //small files queue up vs doing all the large files all
+                //at once at the end of the archive
+                let mut source_file = fs::File::open(traversal.path.as_ref())?;
+                let written_size = io::copy(&mut source_file, tarball)?;
+
+                if written_size != traversal.expected_data_size {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.path, (traversal.expected_data_size - written_size))));
+                }
+            }
+            
+            Ok(())
+        },
+        Err(ref x) => return Err(io::Error::new(x.kind(), format!("{:?}", x)))
+    }
 }

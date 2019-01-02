@@ -1,4 +1,4 @@
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::mpsc::{SyncSender};
 use std::{io, path, fs};
 use rayon::Scope;
 
@@ -26,10 +26,10 @@ pub fn traverse<'a, P: AsRef<path::Path>, Q: AsRef<path::Path>>(basepath: P, pat
                         traverse(cl_basepath, pathentry, archive_header_fn, s, &c).unwrap();
                     });
                 } else if pathentry.is_file() {
-                    s.spawn(move |s| {
+                    s.spawn(move |_| {
                         let c = child_c;
                         
-                        c.send(archive_header_fn(cl_basepath.as_ref(), &entry));
+                        c.send(archive_header_fn(cl_basepath.as_ref(), &entry)).unwrap();
                     });
                 }
             },
