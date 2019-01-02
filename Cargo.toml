@@ -7,3 +7,4 @@ authors = ["David Wendt"]
 rayon = "1.0.3"
 pad = "0.1" #omfg wtf am I doing. fucking left-pad?!
 pathdiff = "0.1.0"
+argparse = "0.2.2"
