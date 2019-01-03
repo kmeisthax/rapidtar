@@ -205,7 +205,7 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::{format_tar_numeral, format_tar_string, format_tar_filename};
+    use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
     use std::{io, path};
     
     #[test]
@@ -233,18 +233,17 @@ mod tests {
     
     #[test]
     fn format_tar_filename_short() {
-        let (old, posix, overflow) = format_tar_filename(path::Path::new("/bar/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("/bar/quux"), path::Path::new("/bar")).unwrap();
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
         assert_eq!("quux".as_bytes(), &old[0..4]);
         assert_eq!(vec![0 as u8; 96], &old[4..]);
         assert_eq!(vec![0 as u8; 155], posix);
-        assert_eq!(overflow, false);
     }
     
     #[test]
     fn format_tar_filename_medium() {
-        let (old, posix, overflow) = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
         
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
@@ -252,7 +251,6 @@ mod tests {
         assert_eq!(vec![0 as u8; 3], &old[97..]);
         assert_eq!("1/2/3/4/5".as_bytes(), &posix[0..9]);
         assert_eq!(vec![0 as u8; 146], &posix[9..]);
-        assert_eq!(overflow, false);
     }
     
     #[test]

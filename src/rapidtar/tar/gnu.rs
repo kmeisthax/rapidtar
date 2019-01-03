@@ -39,7 +39,7 @@ fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::{format_gnu_numeral};
+    use rapidtar::tar::gnu::{format_gnu_numeral};
     
     #[test]
     fn format_gnu_numeral_8() {
