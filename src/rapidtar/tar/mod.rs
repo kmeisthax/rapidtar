@@ -1,5 +1,6 @@
 mod gnu;
 mod ustar;
+mod blocking;
 
 use std::{io, path, fs};
 use std::io::Read;
