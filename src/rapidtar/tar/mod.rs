@@ -23,6 +23,15 @@ pub fn checksum_header(header: &mut Vec<u8>) {
     }
 }
 
+/// Given a directory entry, and the current traversal basepath, produce a valid
+/// TraversalResult containing, at minimum, a valid tar header and the expected
+/// file size of the data.
+/// 
+/// headergen attempts to precache the file's contents in the TraversalResult.
+/// This is only done to files smaller than 10MB in size; the purpose of this
+/// behavior is to increase the depth of I/O queues presented to filesystem
+/// media when header generation is performed in combination with multi-threaded
+/// directory traversal (see rapidtar::traverse).
 pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::TraversalResult {
     let mut tarheader = tar::ustar::ustar_header(&entry, basepath);
     let mut filedata_in_header = false;
@@ -71,6 +80,8 @@ pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::Trave
                     filedata_in_header: filedata_in_header}
 }
 
+/// Given a traversal result, attempt to serialize it's data as tar format data
+/// in the given tarball writer.
 pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write) -> io::Result<()> {
     match traversal.tarheader {
         Ok(ref header) => {
