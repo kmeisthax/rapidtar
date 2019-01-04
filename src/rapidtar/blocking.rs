@@ -92,7 +92,7 @@ impl<W:Write> Write for BlockingWriter<W> {
 #[cfg(test)]
 mod tests {
     use std::io::{Write, Cursor};
-    use rapidtar::tar::blocking::BlockingWriter;
+    use rapidtar::blocking::BlockingWriter;
     
     #[test]
     fn blocking_factor_1_block_passthrough() {
