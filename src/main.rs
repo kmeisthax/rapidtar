@@ -2,13 +2,18 @@ extern crate rayon;
 extern crate pad;
 extern crate pathdiff;
 extern crate argparse;
+extern crate num;
+
+#[cfg(windows)]
+extern crate winapi;
 
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store};
 use std::{io, fs, thread};
 use std::sync::mpsc::{sync_channel, Receiver};
-use rapidtar::{tar, traverse, blocking};
+use rapidtar::{tar, traverse, blocking, tape};
+use rapidtar::tape::windows;
 
 use std::io::Write;
 
@@ -40,7 +45,12 @@ fn main() -> io::Result<()> {
     
     let writer = thread::spawn(|| {
         let reciever : Receiver<traverse::TraversalResult> = reciever;
-        let mut tarball = blocking::BlockingWriter::new(fs::File::create(outfile).unwrap());
+        let mut tape = windows::WindowsTapeDevice::open_tape_number(1).unwrap();
+        
+        tape.seek_to_eot().unwrap();
+        
+        //let mut tarball = blocking::BlockingWriter::new(fs::File::create(outfile).unwrap());
+        let mut tarball = blocking::BlockingWriter::new(tape);
         
         eprintln!("Started");
         

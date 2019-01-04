@@ -8,3 +8,7 @@ rayon = "1.0.3"
 pad = "0.1" #omfg wtf am I doing. fucking left-pad?!
 pathdiff = "0.1.0"
 argparse = "0.2.2"
+num = "0.2.0"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
