@@ -59,7 +59,7 @@ impl<W:Write> Write for BlockingWriter<W> {
         };
         let write_size = buf.len() - remain;
         
-        if (self.block.len() >= self.blocking_factor) {
+        if self.block.len() >= self.blocking_factor {
             match self.inner.write_all(&self.block) {
                 Ok(()) => {
                     self.block.truncate(0);

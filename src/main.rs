@@ -63,7 +63,7 @@ fn main() -> io::Result<()> {
         traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender)
     }).unwrap();
     
-    writer.join();
+    writer.join().unwrap();
     
     Ok(())
 }

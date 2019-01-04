@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn format_gnu_numeral_8_verylarge() {
         assert!(match format_gnu_numeral(0xDEADBEEFDEADBEEF, 8) {
-            Some(x) => false,
+            Some(_) => false,
             None => true
         });
     }

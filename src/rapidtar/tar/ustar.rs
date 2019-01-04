@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn format_tar_numeral_8_large() {
         assert!(match format_tar_numeral(0xDEADBE, 8) {
-            Some(x) => false,
+            Some(_) => false,
             None => true
         });
     }
