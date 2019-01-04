@@ -8,7 +8,9 @@ mod rapidtar;
 use argparse::{ArgumentParser, Store};
 use std::{io, fs, thread};
 use std::sync::mpsc::{sync_channel, Receiver};
-use rapidtar::{tar, traverse};
+use rapidtar::{tar, traverse, blocking};
+
+use std::io::Write;
 
 fn main() -> io::Result<()> {
     //Here's some configuration!
@@ -36,25 +38,32 @@ fn main() -> io::Result<()> {
     //in a maximum number of 1024 files - 1MB each - in memory at one time.
     let (sender, reciever) = sync_channel(channel_queue_depth);
     
-    thread::spawn(|| {
+    let writer = thread::spawn(|| {
         let reciever : Receiver<traverse::TraversalResult> = reciever;
-        let mut tarball = fs::File::create(outfile).unwrap();
+        let mut tarball = blocking::BlockingWriter::new(fs::File::create(outfile).unwrap());
         
-        println!("Started");
+        eprintln!("Started");
         
         while let Ok(entry) = reciever.recv() {
             match tar::serialize(&entry, &mut tarball) {
-                Ok(_) => {},
+                Ok(_) => {
+                    eprintln!("{:?}", entry.path);
+                },
                 Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.path, e)
             }
         }
+        
+        tarball.write_all(&vec![0; 1024]).unwrap();
+        tarball.flush().unwrap();
 
-        println!("Done");
+        eprintln!("Done");
     });
     
     rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit).build().unwrap().scope(move |s| {
         traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender)
     }).unwrap();
+    
+    writer.join();
     
     Ok(())
 }
