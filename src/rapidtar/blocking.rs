@@ -53,6 +53,11 @@ impl<W: Write> BlockingWriter<W> {
 
 impl<W:Write> Write for BlockingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        //Shortcircuit the block buffer if we can.
+        if self.block.len() == 0 && buf.len() >= self.blocking_factor {
+            return self.inner.write(&buf[0..self.blocking_factor]);
+        }
+        
         let remain = match self.fill_block(buf) {
             Some(remain) => remain.len(),
             None => 0
