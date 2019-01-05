@@ -10,10 +10,10 @@ extern crate winapi;
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store};
-use std::{io, fs, thread};
+use std::{io, fs, path, thread};
 use std::sync::mpsc::{sync_channel, Receiver};
-use rapidtar::{tar, traverse, blocking, tape};
-use rapidtar::tape::windows;
+use rapidtar::{tar, traverse, blocking};
+use rapidtar::fs::open_sink;
 
 use std::io::Write;
 
@@ -45,14 +45,7 @@ fn main() -> io::Result<()> {
     
     let writer = thread::spawn(|| {
         let reciever : Receiver<traverse::TraversalResult> = reciever;
-        let mut tape = windows::WindowsTapeDevice::open_tape_number(1).unwrap();
-        
-        tape.seek_to_eot().unwrap();
-        
-        //let mut tarball = blocking::BlockingWriter::new(fs::File::create(outfile).unwrap());
-        let mut tarball = blocking::BlockingWriter::new(tape);
-        
-        eprintln!("Started");
+        let mut tarball = open_sink(outfile).unwrap();
         
         while let Ok(entry) = reciever.recv() {
             match tar::serialize(&entry, &mut tarball) {
