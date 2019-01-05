@@ -54,8 +54,16 @@ impl<W: Write> BlockingWriter<W> {
 impl<W:Write> Write for BlockingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         //Shortcircuit the block buffer if we can.
+        let mut shortcircuit_writes = 0;
         if self.block.len() == 0 && buf.len() >= self.blocking_factor {
-            return self.inner.write(&buf[0..self.blocking_factor]);
+            while shortcircuit_writes <= (buf.len() - self.blocking_factor) {
+                match self.inner.write(&buf[shortcircuit_writes..(shortcircuit_writes + self.blocking_factor)]) {
+                    Ok(blk_write) => shortcircuit_writes += blk_write,
+                    Err(x) => return Err(x)
+                }
+            }
+            
+            return Ok(shortcircuit_writes);
         }
         
         let remain = match self.fill_block(buf) {
@@ -132,5 +140,26 @@ mod tests {
         assert_eq!(&blk.as_inner_writer().get_ref()[384..768], vec![1; 384].as_slice());
         assert_eq!(&blk.as_inner_writer().get_ref()[768..1152], vec![2; 384].as_slice());
         assert_eq!(&blk.as_inner_writer().get_ref()[1152..], vec![0; 384].as_slice());
+    }
+    
+    #[test]
+    fn blocking_factor_1_record_splitting_shortcircuit() {
+        let mut blk = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
+        
+        blk.write_all(&vec![0; 384]).unwrap();
+        blk.write_all(&vec![1; 1024]).unwrap();
+        
+        assert_eq!(blk.as_inner_writer().get_ref().len(), 1024);
+        assert_eq!(&blk.as_inner_writer().get_ref()[0..384], vec![0; 384].as_slice());
+        assert_eq!(&blk.as_inner_writer().get_ref()[384..], vec![1; 640].as_slice());
+        
+        blk.write_all(&vec![2; 2048]).unwrap();
+        blk.flush().unwrap();
+        
+        assert_eq!(blk.as_inner_writer().get_ref().len(), 3584);
+        assert_eq!(&blk.as_inner_writer().get_ref()[0..384], vec![0; 384].as_slice());
+        assert_eq!(&blk.as_inner_writer().get_ref()[384..1408], vec![1; 1024].as_slice());
+        assert_eq!(&blk.as_inner_writer().get_ref()[1408..3456], vec![2; 2048].as_slice());
+        assert_eq!(&blk.as_inner_writer().get_ref()[3456..], vec![0; 128].as_slice());
     }
 }
