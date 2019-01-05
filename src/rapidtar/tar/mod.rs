@@ -1,5 +1,6 @@
 mod gnu;
 mod ustar;
+mod pax;
 
 use std::{io, path, fs};
 use std::io::Read;
