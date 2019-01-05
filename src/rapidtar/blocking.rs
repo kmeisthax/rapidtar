@@ -75,7 +75,10 @@ impl<W:Write> Write for BlockingWriter<W> {
         if self.block.len() >= self.blocking_factor {
             match self.inner.write_all(&self.block) {
                 Ok(()) => {
-                    self.block.truncate(0);
+                    //This is actually safe, because this always acts to shrink
+                    //the array, failing to drop values properly is safe (though
+                    //bad practice), and u8 doesn't implement Drop anyway.
+                    unsafe { self.block.set_len(0); }
                     Ok(write_size)
                 },
                 Err(x) => Err(x)
