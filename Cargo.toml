@@ -11,4 +11,4 @@ argparse = "0.2.2"
 num = "0.2.0"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
+winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror', 'ioapiset'] }
