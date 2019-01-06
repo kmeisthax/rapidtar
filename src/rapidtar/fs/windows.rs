@@ -23,6 +23,11 @@ pub fn open_sink<P: AsRef<path::Path>>(outfile: P) -> io::Result<Box<io::Write>>
         }
     }
     
+    //Windows does this fun thing where it pretends tape devices don't exist
+    //sometimes, so we ignore up to 5 file/path not found errors before actually
+    //forwarding one along
+    let mut notfound_count = 0;
+    
     if is_tape {
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
@@ -32,7 +37,20 @@ pub fn open_sink<P: AsRef<path::Path>>(outfile: P) -> io::Result<Box<io::Write>>
                     return Ok(Box::new(BlockingWriter::new(tape)));
                 },
                 Err(e) => {
-                    eprintln!("Got error trying to open Windows tape device, trying again: {:?}", e)
+                    match e.raw_os_error() {
+                        Some(errcode) => {
+                            if errcode == 2 || errcode == 3 {
+                                notfound_count += 1;
+
+                                if notfound_count > 5 {
+                                    return Err(e);
+                                }
+                            } else {
+                                return Err(e);
+                            }
+                        },
+                        None => return Err(e)
+                    }
                 }
             }
         }
