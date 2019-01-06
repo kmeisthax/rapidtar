@@ -6,23 +6,6 @@ use std::{io, path, fs};
 use std::io::Read;
 use rapidtar::{tar, traverse};
 
-/// Given a tar header (any format), calculate a valid checksum.
-/// 
-/// Any existing data in the header checksum field will be destroyed.
-pub fn checksum_header(header: &mut Vec<u8>) {
-    let mut checksum : u64 = 0;
-    
-    header.splice(148..156, "        ".as_bytes().iter().cloned());
-    
-    for byte in header.iter() {
-        checksum += *byte as u64;
-    }
-    
-    if let Some(checksum_val) = ustar::format_tar_numeral(checksum & 0o777777, 7) {
-        header.splice(148..155, checksum_val.iter().cloned());
-    }
-}
-
 /// Given a directory entry, and the current traversal basepath, produce a valid
 /// TraversalResult containing, at minimum, a valid tar header and the expected
 /// file size of the data.
@@ -38,7 +21,7 @@ pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::Trave
     let mut expected_data_size = 0;
 
     if let Ok(mut tardata) = tarheader {
-        tar::checksum_header(&mut tardata);
+        tar::ustar::checksum_header(&mut tardata);
 
         //Parallel I/O requires all files be loaded into
         //memory, so we establish a somewhat arbitrary
@@ -97,6 +80,11 @@ pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write)
 
                 if written_size != traversal.expected_data_size {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.path, (traversal.expected_data_size - written_size))));
+                }
+                
+                let padding_needed = (written_size % 512) as usize;
+                if padding_needed != 0 {
+                    tarball.write_all(&vec![0; 512 - padding_needed])?;
                 }
             }
             

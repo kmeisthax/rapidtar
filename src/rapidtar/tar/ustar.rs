@@ -20,7 +20,7 @@ pub fn format_tar_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
     }
 }
 
-fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
+pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
     if the_string.len() < field_size {
         let mut result = Vec::with_capacity(field_size);
         
@@ -38,7 +38,7 @@ fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
 /// This is the UNIX version of the function. It pulls the mode bits from the OS
 /// to generate the tar mode.
 #[cfg(unix)]
-fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
+pub fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
     use std::os::unix::fs::PermissionsExt;
     
     format_tar_numeral(dirent.metadata()?.permissions().mode(), 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar numeral too large"))
@@ -52,7 +52,7 @@ fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
 /// TODO: Make a Windows (NT?) version of this that queries the Security API to
 /// produce plausible mode bits.
 #[cfg(not(unix))]
-fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
+pub fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
     if dirent.metadata()?.permissions().readonly() {
         format_tar_numeral(0o444, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar mode numeral too large... somehow"))
     } else {
@@ -81,7 +81,7 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
-fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
+pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
     //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
     let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
     let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
@@ -201,6 +201,23 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
     header.extend(vec![0; 12]); //padding
     
     Ok(header)
+}
+
+/// Given a tar header (ustar format), calculate a valid checksum.
+/// 
+/// Any existing data in the header checksum field will be destroyed.
+pub fn checksum_header(header: &mut [u8]) {
+    let mut checksum : u64 = 0;
+    
+    header[148..156].clone_from_slice("        ".as_bytes());
+    
+    for byte in header.iter() {
+        checksum += *byte as u64;
+    }
+    
+    if let Some(checksum_val) = format_tar_numeral(checksum & 0o777777, 7) {
+        header[148..155].clone_from_slice(&checksum_val);
+    }
 }
 
 #[cfg(test)]

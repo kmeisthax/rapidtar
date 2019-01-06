@@ -1,3 +1,4 @@
+use std::{io, time};
 use pad::{PadStr, Alignment};
 
 /// Format a number in GNU/STAR octal/integer hybrid format.
@@ -12,7 +13,7 @@ use pad::{PadStr, Alignment};
 /// 
 /// In the event that the number cannot be represented in even this form, the
 /// function yields None.
-fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
+pub fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
     let numsize = (number as f32).log(8.0);
     let gnusize = (number as f32).log(256.0);
     
@@ -34,6 +35,13 @@ fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
         value.push(0);
         
         Some(value)
+    }
+}
+
+pub fn format_gnu_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
+    match dirtime.duration_since(time::UNIX_EPOCH) {
+        Ok(unix_duration) => format_gnu_numeral(unix_duration.as_secs(), 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar numeral too large")),
+        Err(_) => Err(io::Error::new(io::ErrorKind::InvalidData, "File older than UNIX")) //TODO: Negative time
     }
 }
 
