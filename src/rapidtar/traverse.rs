@@ -30,8 +30,14 @@ pub fn traverse<'a, P: AsRef<path::Path>, Q: AsRef<path::Path>>(basepath: P, pat
                 if pathentry.is_dir() {
                     s.spawn(move |s| {
                         let c = child_c;
+                        let pathname_string = format!("{:?}", pathentry);
                         
-                        traverse(cl_basepath, pathentry, archive_header_fn, s, &c).unwrap();
+                        match traverse(cl_basepath, pathentry, archive_header_fn, s, &c) {
+                            Ok(_) => {},
+                            Err(e) => {
+                                eprintln!("Error attempting to traverse directory path {:?}, got error {:?}", pathname_string, e);
+                            }
+                        };
                     });
                 } else if pathentry.is_file() {
                     s.spawn(move |_| {
