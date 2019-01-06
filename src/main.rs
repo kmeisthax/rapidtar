@@ -21,6 +21,7 @@ fn main() -> io::Result<()> {
     //Here's some configuration!
     let mut channel_queue_depth = 1024;
     let mut parallel_io_limit = 512;
+    let mut blocking_factor = 20; //TAR standard, but suboptimal for modern tape
     let mut basepath = ".".to_string();
     let mut outfile = "out.tar".to_string();
     
@@ -33,6 +34,7 @@ fn main() -> io::Result<()> {
         ap.refer(&mut outfile).add_argument("outfile", Store, "The file to write the archive to");
         ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
+        ap.refer(&mut blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
         
         ap.parse_args_or_exit();
     }
@@ -45,7 +47,7 @@ fn main() -> io::Result<()> {
     
     rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
         let reciever : Receiver<traverse::TraversalResult> = reciever;
-        let mut tarball = open_sink(outfile).unwrap();
+        let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
         s.spawn(move |s| {
             traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender);

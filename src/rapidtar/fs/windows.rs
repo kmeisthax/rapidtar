@@ -5,7 +5,7 @@ use rapidtar::blocking::BlockingWriter;
 /// Open a sink object for writing an archive (aka "tape").
 /// 
 /// Returned writer can be either an actual tape device or a standard file.
-pub fn open_sink<P: AsRef<path::Path>>(outfile: P) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: usize) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
     let mut is_tape = false;
     
     {
@@ -34,7 +34,7 @@ pub fn open_sink<P: AsRef<path::Path>>(outfile: P) -> io::Result<Box<io::Write>>
                 Ok(mut tape) => {
                     tape.seek_to_eot()?;
 
-                    return Ok(Box::new(BlockingWriter::new(tape)));
+                    return Ok(Box::new(BlockingWriter::new_with_factor(tape, blocking_factor)));
                 },
                 Err(e) => {
                     match e.raw_os_error() {
