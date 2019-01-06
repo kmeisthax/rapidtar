@@ -136,8 +136,6 @@ mod tests {
         blk.write_all(&vec![2; 384]).unwrap();
         blk.flush().unwrap();
         
-        println!("{:?}", &blk.as_inner_writer().get_ref());
-        
         assert_eq!(blk.as_inner_writer().get_ref().len(), 1536);
         assert_eq!(&blk.as_inner_writer().get_ref()[0..384], vec![0; 384].as_slice());
         assert_eq!(&blk.as_inner_writer().get_ref()[384..768], vec![1; 384].as_slice());

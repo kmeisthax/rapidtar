@@ -18,8 +18,6 @@ fn format_pax_attribute(key: &str, val: &str) -> Vec<u8> {
     let minimum_length = 1 + key_bytes.len() + 1 + val_bytes.len() + 1; //space, key, equals, val, newline
     let mut number_length = (minimum_length as f32).log(10.0).floor() as usize + 1; //not ceil() because even zero needs to be one, ten needs to be two, etc
     
-    eprintln!("{}, {}", minimum_length, number_length);
-    
     //Search for a fixed point in the total length function where adding the
     //length of the number doesn't increase the length of the number
     while (number_length as f32 + minimum_length as f32).log(10.0).floor() as usize + 1 > number_length {
@@ -102,8 +100,6 @@ pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path) -
             oldname_part.resize(100, 0);
             
             let cannot_truncate_losslessly = relapath_encoded.len() > 155;
-            
-            println!("{:?}", relapath_encoded);
             
             //Hail Mary: Try to truncate the path at another separator.
             //This generates partial results and counts as truncation.
@@ -231,7 +227,7 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 /// * Files larger than 1YB will not be extractable on pre-POSIX GNU tar
 ///   implementations. I do not expect this to be a concern for some time, if
 ///   ever.
-fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
+pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
     //First, compute the PAX extended header stream
     let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath)?;
     

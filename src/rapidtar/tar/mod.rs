@@ -16,12 +16,12 @@ use rapidtar::{tar, traverse};
 /// media when header generation is performed in combination with multi-threaded
 /// directory traversal (see rapidtar::traverse).
 pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::TraversalResult {
-    let mut tarheader = tar::ustar::ustar_header(&entry, basepath);
+    let mut tarheader = tar::pax::pax_header(&entry, basepath);
     let mut filedata_in_header = false;
     let mut expected_data_size = 0;
 
     if let Ok(mut tardata) = tarheader {
-        tar::ustar::checksum_header(&mut tardata);
+        tar::pax::checksum_header(&mut tardata);
 
         //Parallel I/O requires all files be loaded into
         //memory, so we establish a somewhat arbitrary
