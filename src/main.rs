@@ -43,9 +43,13 @@ fn main() -> io::Result<()> {
     //in a maximum number of 1024 files - 1MB each - in memory at one time.
     let (sender, reciever) = sync_channel(channel_queue_depth);
     
-    let writer = thread::spawn(|| {
+    rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
         let reciever : Receiver<traverse::TraversalResult> = reciever;
         let mut tarball = open_sink(outfile).unwrap();
+        
+        s.spawn(move |s| {
+            traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender);
+        });
         
         while let Ok(entry) = reciever.recv() {
             match tar::serialize(&entry, &mut tarball) {
@@ -61,12 +65,6 @@ fn main() -> io::Result<()> {
 
         eprintln!("Done");
     });
-    
-    rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit).build().unwrap().scope(move |s| {
-        traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender)
-    }).unwrap();
-    
-    writer.join().unwrap();
     
     Ok(())
 }
