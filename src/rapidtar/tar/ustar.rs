@@ -1,6 +1,7 @@
 use std::{io, fs, path, time};
 use pad::{PadStr, Alignment};
 use pathdiff::diff_paths;
+use rapidtar::tar::pax;
 
 /// Format a number in tar octal format, with a trailing null.
 /// 
@@ -74,75 +75,20 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// Two bytestrings, corresponding to the name and prefix fields of the USTAR
 /// header format.
 /// 
-/// Paths will be formatted with forward slashes separating UTF-8 encoded path
-/// components on all platforms. Platforms whose paths may contain invalid
-/// Unicode sequences, for whatever reason, will see said sequences replaced
-/// with U+FFFD.
+/// Paths will be formatted with forward slashes separating ASCII encoded path
+/// components on all platforms. Paths with non-ASCII characters are not valid
+/// in USTAR format and will be rejected.
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
 pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
-    let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
-    let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
-    let mut first = true;
+    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, basepath)?;
     
-    for component in relapath.components() {
-        if !first {
-            relapath_encoded.push('/' as u8);
-        } else {
-            first = false;
-        }
-        
-        match component {
-            path::Component::Normal(name) => relapath_encoded.extend(name.to_string_lossy().into_owned().into_bytes()),
-            path::Component::CurDir => relapath_encoded.extend(".".as_bytes()),
-            path::Component::ParentDir => relapath_encoded.extend("..".as_bytes()),
-            _ => {}
-        }
+    if was_truncated {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long or contains non-ASCII characters"));
     }
     
-    relapath_encoded.push(0);
-    
-    if relapath_encoded.len() <= 100 {
-        relapath_encoded.resize(100, 0);
-        
-        return Ok((relapath_encoded, vec![0; 155]));
-    }
-    
-    //Find a good spot to split the path.
-    for i in (1..100).rev() {
-        if relapath_encoded[relapath_encoded.len() - i] == '/' as u8 {
-            let splitpoint = relapath_encoded.len() - i;
-            let mut oldname_part = relapath_encoded.split_off(splitpoint + 1);
-            let newname_length = relapath_encoded.len();
-            
-            assert!(oldname_part.len() < 100);
-            
-            relapath_encoded.remove(newname_length - 1);
-            oldname_part.resize(100, 0);
-            
-            let will_truncate = relapath_encoded.len() > 155;
-            
-            if will_truncate {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long"))
-            } else {
-                relapath_encoded.resize(155, 0);
-
-                return Ok((oldname_part, relapath_encoded))
-            }
-        }
-    }
-    
-    //Okay wtf there wasn't anywhere to split it!?
-    if relapath_encoded.len() < 155 {
-        relapath_encoded.resize(155, 0);
-        
-        return Ok((vec![0;100], relapath_encoded));
-    }
-    
-    //omfg i cant even, literally
-    return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long and cannot be split"))
+    Ok((unix, prefix))
 }
 
 /// Given a directory entry, form a tar header for that given entry.

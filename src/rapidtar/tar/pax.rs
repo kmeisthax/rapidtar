@@ -1,7 +1,7 @@
-use std::{io, path, fs, time};
+use std::{io, path, fs, time, cmp};
 use pathdiff::diff_paths;
 use rapidtar::tar::ustar;
-use rapidtar::tar::ustar::{format_tar_filename, format_tar_mode, format_tar_string};
+use rapidtar::tar::ustar::{format_tar_numeral, format_tar_filename, format_tar_mode, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
 
 /// Format a key-value pair in pax format.
@@ -40,6 +40,114 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
         Ok(unix_duration) => Ok(format!("{}", unix_duration.as_secs())),
         Err(_) => Err(io::Error::new(io::ErrorKind::InvalidData, "File older than UNIX")) //TODO: Negative time
     }
+}
+
+/// Given a directory path, split and format it for inclusion in a tar header.
+/// 
+/// # Returns
+/// 
+/// Two bytestrings, corresponding to the name and prefix fields of the USTAR
+/// header format, and a boolean indicating if the path fields were truncated
+/// or otherwise are invalid or not.
+/// 
+/// Paths will be formatted with forward slashes separating UTF-8 encoded path
+/// components on all platforms. Platforms whose paths may contain invalid
+/// Unicode sequences, for whatever reason, will see said sequences replaced
+/// with U+FFFD.
+pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
+    //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
+    let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
+    let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
+    let mut first = true;
+    let mut is_ascii = true;
+    
+    for component in relapath.components() {
+        if !first {
+            relapath_encoded.push('/' as u8);
+        } else {
+            first = false;
+        }
+        
+        match component {
+            path::Component::Normal(name) => {
+                let utf8ish_name = name.to_string_lossy().into_owned();
+                
+                is_ascii = is_ascii && utf8ish_name.is_ascii();
+                relapath_encoded.extend(utf8ish_name.replace(|c: char| !c.is_ascii(), "").into_bytes());
+            },
+            path::Component::CurDir => relapath_encoded.extend(".".as_bytes()),
+            path::Component::ParentDir => relapath_encoded.extend("..".as_bytes()),
+            _ => {}
+        }
+    }
+    
+    relapath_encoded.push(0);
+    
+    if relapath_encoded.len() <= 100 {
+        relapath_encoded.resize(100, 0);
+        
+        return Ok((relapath_encoded, vec![0; 155], !is_ascii));
+    }
+    
+    //Find a good spot to split the path.
+    for i in (1..100).rev() {
+        if relapath_encoded[relapath_encoded.len() - i] == '/' as u8 {
+            let splitpoint = relapath_encoded.len() - i;
+            let mut oldname_part = relapath_encoded.split_off(splitpoint + 1);
+            let newname_length = relapath_encoded.len();
+            
+            assert!(oldname_part.len() < 100);
+            
+            relapath_encoded.remove(newname_length - 1);
+            oldname_part.resize(100, 0);
+            
+            let cannot_truncate_losslessly = relapath_encoded.len() > 155;
+            
+            println!("{:?}", relapath_encoded);
+            
+            //Hail Mary: Try to truncate the path at another separator.
+            //This generates partial results and counts as truncation.
+            if cannot_truncate_losslessly {
+                for j in (1..157).rev() {
+                    if relapath_encoded[relapath_encoded.len() - j] == '/' as u8 {
+                        let new_splitpoint = relapath_encoded.len() - j;
+                        let mut newname_part = relapath_encoded.split_off(new_splitpoint + 1);
+                        
+                        newname_part.resize(155, 0);
+                        
+                        return Ok((oldname_part, newname_part, true));
+                    }
+                }
+            }
+            
+            relapath_encoded.resize(155, 0);
+            
+            return Ok((oldname_part, relapath_encoded, !is_ascii || cannot_truncate_losslessly));
+        }
+    }
+    
+    //The file ends in a path component exceeding 100 characters.
+    //If it's shorter than 155 characters total, we can still faithfully
+    //represent the filename in USTAR fields.
+    if relapath_encoded.len() < 155 {
+        relapath_encoded.resize(155, 0);
+        
+        return Ok((vec![0;100], relapath_encoded, !is_ascii));
+    }
+    
+    //Okay, turns out it's actually a really really long filename with no path
+    //separators. That's fine. We can deal. In this case, we're going to just
+    //haphazardly chop the filename up in the name of having something to work
+    //with. This generates incorrect filenames and is only used as a last-resort
+    //for PAX archives that need to have *something* in the file header.
+    //This codepath would only be encountered on paths whose final component
+    //exceeds 155 characters, and it adds a path separator by doing so,
+    //which is super wrong.
+    let offending_length = relapath_encoded.len();
+    let truncation_point = offending_length - 100;
+    let second_truncation_point = truncation_point - 155;
+
+    return Ok((relapath_encoded[truncation_point..offending_length].to_vec(), relapath_encoded[second_truncation_point..truncation_point].to_vec(), true));
 }
 
 /// Given a directory path, format it for inclusion in a pax exheader.
@@ -108,8 +216,7 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 /// Every effort will be made to produce a TAR header that, on non-PAX
 /// implementations, extracts correctly to the same data that was archived. This
 /// is only possible if the file would ordinarily be archivable in that
-/// implementations' native/legacy format. Otherwise, the archive will not be
-/// readable by legacy implementations.
+/// implementations' native/legacy format.
 /// 
 /// Specifically, the following limitations apply:
 /// 
@@ -119,17 +226,28 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 ///   tar headers and result in invalid files being extracted.)
 /// * Files larger than 8GB and smaller than 1YB will be extractable on pre-PAX
 ///   GNU tar implementations. We generate GNU numerals in our PAX headers
-///   since GNU tar is fairly widespread.
+///   since GNU tar is fairly widespread. Note that this is a compatibility
+///   mechanism; a PAX size value is always added to files larger than 8GB.
 /// * Files larger than 1YB will not be extractable on pre-POSIX GNU tar
 ///   implementations. I do not expect this to be a concern for some time, if
 ///   ever.
 fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
     //First, compute the PAX extended header stream
+    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath)?;
+    
+    assert_eq!(relapath_unix.len(), 100);
+    assert_eq!(relapath_extended.len(), 155);
+    
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
     let metadata = dirent.metadata()?;
     
-    extended_stream.extend(format_pax_attribute("size", &format!("{}", metadata.len())));
-    extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&dirent.path(), basepath)?));
+    if let None = format_tar_numeral(metadata.len(), 12) {
+        extended_stream.extend(format_pax_attribute("size", &format!("{}", metadata.len())));
+    }
+    
+    if legacy_format_truncated {
+        extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&dirent.path(), basepath)?));
+    }
     
     if let Ok(mtime) = metadata.modified() {
         extended_stream.extend(format_pax_attribute("mtime", &format_pax_time(&mtime)?));
@@ -143,38 +261,38 @@ fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8
         extended_stream.extend(format_pax_attribute("LIBARCHIVE.creationtime", &format_pax_time(&birthtime)?));
     }
     
-    //Pad the extended header to the next tar record
-    let padding_needed = (extended_stream.len() % 512) as usize;
-    if padding_needed != 0 {
-        extended_stream.extend(&vec![0; 512 - padding_needed]);
-    }
+    let mut header : Vec<u8> = Vec::with_capacity(1536);
     
     //sup dawg, I heard u like headers so we put a header on your header
-    let mut header : Vec<u8> = Vec::with_capacity(512);
-    let (relapath_unix, relapath_extended) = format_tar_filename(&dirent.path(), basepath)?;
-    
-    assert_eq!(relapath_unix.len(), 100);
-    assert_eq!(relapath_extended.len(), 155);
-    
-    header.extend(&relapath_unix); //Last 100 bytes of path
-    header.extend(format_tar_mode(dirent)?); //mode
-    header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: UID
-    header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: GID
-    header.extend(format_gnu_numeral(extended_stream.len() as u64, 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File extended header is too long"))?); //File size
-    header.extend(format_gnu_time(&metadata.modified()?).unwrap_or(vec![0; 12])); //mtime
-    header.extend("        ".as_bytes()); //checksummable format checksum value
-    header.extend("x".as_bytes()); //TODO: Link type / file type
-    header.extend(vec![0; 100]); //TODO: Link name
-    header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
-    header.extend("00".as_bytes()); //version 00
-    header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
-    header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
-    header.extend(vec![0; 8]); //TODO: Device Major
-    header.extend(vec![0; 8]); //TODO: Device Minor
-    header.extend(&relapath_extended);
-    header.extend(vec![0; 12]); //padding
-    
-    header.extend(extended_stream); //All the PAX 
+    if extended_stream.len() > 0 {
+        let padding_needed = (extended_stream.len() % 512) as usize;
+        if padding_needed != 0 {
+            extended_stream.extend(&vec![0; 512 - padding_needed]);
+        }
+        
+        //TODO: What if the extended header exceeds 8GB?
+        //We're using GNU numerals for now, but that's probably not the correct
+        //behavior.
+        header.extend(&relapath_unix); //Last 100 bytes of path
+        header.extend(format_tar_mode(dirent)?); //mode
+        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: UID
+        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: GID
+        header.extend(format_gnu_numeral(extended_stream.len() as u64, 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File extended header is too long"))?); //File size
+        header.extend(format_gnu_time(&metadata.modified()?).unwrap_or(vec![0; 12])); //mtime
+        header.extend("        ".as_bytes()); //checksummable format checksum value
+        header.extend("x".as_bytes()); //TODO: Link type / file type
+        header.extend(vec![0; 100]); //TODO: Link name
+        header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
+        header.extend("00".as_bytes()); //version 00
+        header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
+        header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
+        header.extend(vec![0; 8]); //TODO: Device Major
+        header.extend(vec![0; 8]); //TODO: Device Minor
+        header.extend(&relapath_extended);
+        header.extend(vec![0; 12]); //padding
+
+        header.extend(extended_stream); //All the PAX
+    }
     
     header.extend(relapath_unix); //Last 100 bytes of path
     header.extend(format_tar_mode(dirent)?); //mode
@@ -205,7 +323,8 @@ fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8
 /// 
 /// PAX format headers are variable length and technically consist of multiple
 /// files. This function operates by taking the first and last 512-byte sections
-/// of the 
+/// of the header and checksumming them. If there is only one header then this
+/// behaves identically to ustar::checksum_header.
 pub fn checksum_header(header: &mut Vec<u8>) {
     ustar::checksum_header(&mut header[0..512]);
     
@@ -217,7 +336,8 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::pax::format_pax_attribute;
+    use std::{io, path};
+    use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename};
     
     #[test]
     fn pax_attribute() {
@@ -252,5 +372,55 @@ mod tests {
         let fmtd = format_pax_attribute("x", "yyyyy");
         
         assert_eq!(fmtd, "11 x=yyyyy\n".as_bytes());
+    }
+    
+    #[test]
+    fn pax_legacy_filename_short() {
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/quux"), path::Path::new("/bar")).unwrap();
+        
+        assert_eq!(was_truncated, false);
+        assert_eq!(old.len(), 100);
+        assert_eq!(posix.len(), 155);
+        assert_eq!("quux".as_bytes(), &old[0..4]);
+        assert_eq!(vec![0 as u8; 96], &old[4..]);
+        assert_eq!(vec![0 as u8; 155], posix);
+    }
+    
+    #[test]
+    fn pax_legacy_filename_medium() {
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        
+        assert_eq!(was_truncated, false);
+        assert_eq!(old.len(), 100);
+        assert_eq!(posix.len(), 155);
+        assert_eq!("6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux".as_bytes(), &old[0..97]);
+        assert_eq!(vec![0 as u8; 3], &old[97..]);
+        assert_eq!("1/2/3/4/5".as_bytes(), &posix[0..9]);
+        assert_eq!(vec![0 as u8; 146], &posix[9..]);
+    }
+    
+    #[test]
+    fn pax_legacy_filename_long() {
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        
+        assert_eq!(was_truncated, true);
+        assert_eq!(old.len(), 100);
+        assert_eq!(posix.len(), 155);
+        assert_eq!("6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux".as_bytes(), &old[0..97]);
+        assert_eq!(vec![0 as u8; 3], &old[97..]);
+        assert_eq!("vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5".as_bytes(), &posix[0..155]);
+    }
+    
+    #[test]
+    fn pax_legacy_filename_long_tricky() {
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/uqv/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        
+        assert_eq!(was_truncated, true);
+        assert_eq!(old.len(), 100);
+        assert_eq!(posix.len(), 155);
+        assert_eq!("6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux".as_bytes(), &old[0..97]);
+        assert_eq!(vec![0 as u8; 3], &old[97..]);
+        assert_eq!("w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5".as_bytes(), &posix[0..153]);
+        assert_eq!(vec![0 as u8; 2], &posix[153..]);
     }
 }
