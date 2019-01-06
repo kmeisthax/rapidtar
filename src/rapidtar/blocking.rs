@@ -49,11 +49,43 @@ impl<W: Write> BlockingWriter<W> {
         self.block.extend(&buf[0..block_space]);
         Some(&buf[block_space..])
     }
+    
+    /// Forward a full block onto the inner writer.
+    /// 
+    /// Is a null-operation if the block is not full.
+    /// 
+    /// # Returns
+    /// 
+    /// Ok if the write completed successfully (or there was none); Err if it
+    /// didn't. If the block buffer was full it will be empty, otherwise it will
+    /// be unchanged.
+    fn empty_block<'a>(&mut self) -> io::Result<()> {
+        if self.block.len() >= self.blocking_factor {
+            self.inner.write_all(&self.block)?;
+            
+            //This is actually safe, because this always acts to shrink
+            //the array, failing to drop values properly is safe (though
+            //bad practice), and u8 doesn't implement Drop anyway.
+            unsafe { self.block.set_len(0); }
+        }
+        
+        Ok(())
+    }
 }
 
 impl<W:Write> Write for BlockingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        //Shortcircuit the block buffer if we can.
+        //Precondition: Ensure the write buffer isn't full.
+        self.empty_block()?;
+        
+        //Precondition: Ensure the incoming buffer isn't empty.
+        if buf.len() == 0 {
+            return Ok(0);
+        }
+        
+        //Optimization: If the block buffer is empty, and the incoming data is
+        //larger than a single block, just hand the inner writer slices off the
+        //buffer without copying.
         let mut shortcircuit_writes = 0;
         if self.block.len() == 0 && buf.len() >= self.blocking_factor {
             while shortcircuit_writes <= (buf.len() - self.blocking_factor) {
@@ -63,29 +95,19 @@ impl<W:Write> Write for BlockingWriter<W> {
                 }
             }
             
+            assert!(shortcircuit_writes > 0);
             return Ok(shortcircuit_writes);
         }
         
+        //Normal path: Buffer incoming data.
         let remain = match self.fill_block(buf) {
             Some(remain) => remain.len(),
             None => 0
         };
         let write_size = buf.len() - remain;
         
-        if self.block.len() >= self.blocking_factor {
-            match self.inner.write_all(&self.block) {
-                Ok(()) => {
-                    //This is actually safe, because this always acts to shrink
-                    //the array, failing to drop values properly is safe (though
-                    //bad practice), and u8 doesn't implement Drop anyway.
-                    unsafe { self.block.set_len(0); }
-                    Ok(write_size)
-                },
-                Err(x) => Err(x)
-            }
-        } else {
-            Ok(write_size)
-        }
+        assert!(write_size > 0);
+        Ok(write_size)
     }
     
     /// Flush the output stream, ensuring that all intermediately buffered
@@ -97,11 +119,14 @@ impl<W:Write> Write for BlockingWriter<W> {
     /// lost if the client failed to write a correctly divisible number of bytes
     /// instead.
     fn flush(&mut self) -> io::Result<()> {
-        let cap = self.block.capacity();
+        if (self.block.len() < self.blocking_factor) {
+            self.block.resize(self.blocking_factor, 0);
+        }
         
-        self.block.resize(cap, 0);
-        self.inner.write_all(&self.block)?;
-        self.inner.flush()
+        self.empty_block()?;
+        self.inner.flush()?;
+        
+        Ok(())
     }
 }
 

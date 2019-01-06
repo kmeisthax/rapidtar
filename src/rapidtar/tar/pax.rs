@@ -140,10 +140,16 @@ pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path) -
     //exceeds 155 characters, and it adds a path separator by doing so,
     //which is super wrong.
     let offending_length = relapath_encoded.len();
-    let truncation_point = offending_length - 100;
-    let second_truncation_point = truncation_point - 155;
-
-    return Ok((relapath_encoded[truncation_point..offending_length].to_vec(), relapath_encoded[second_truncation_point..truncation_point].to_vec(), true));
+    let truncation_point = offending_length.checked_sub(100).unwrap_or(0);
+    let second_truncation_point = truncation_point.checked_sub(155).unwrap_or(0);
+    
+    let mut unixpart = relapath_encoded[truncation_point..offending_length].to_vec();
+    let mut extpart = relapath_encoded[second_truncation_point..truncation_point].to_vec();
+    
+    unixpart.resize(100, 0);
+    extpart.resize(155, 0);
+    
+    return Ok((unixpart, extpart, true));
 }
 
 /// Given a directory path, format it for inclusion in a pax exheader.

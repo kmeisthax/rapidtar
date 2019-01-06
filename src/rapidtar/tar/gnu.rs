@@ -25,7 +25,10 @@ pub fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
         result[0] = 0x80;
         
         for i in 0..(field_size - 1) {
-            result[field_size - i - 1] = ((number >> i * 8) & 0xFF) as u8;
+            //Who the hell in their right mind decided shifting by more than the
+            //register size is UB? Who the hell thought it should be remedied
+            //with a thread panic!?
+            result[field_size - i - 1] = ((number.checked_shr(i as u32 * 8).unwrap_or(0)) & 0xFF) as u8;
         }
         
         Some(result)
