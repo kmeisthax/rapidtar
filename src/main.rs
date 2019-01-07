@@ -10,7 +10,7 @@ extern crate winapi;
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store};
-use std::{io, fs, path, thread};
+use std::{io, fs, path, thread, time};
 use std::sync::mpsc::{sync_channel, Receiver};
 use rapidtar::{tar, traverse, blocking};
 use rapidtar::fs::open_sink;
@@ -46,6 +46,7 @@ fn main() -> io::Result<()> {
     let (sender, reciever) = sync_channel(channel_queue_depth);
     
     rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
+        let start_instant = time::Instant::now();
         let reciever : Receiver<traverse::TraversalResult> = reciever;
         let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
@@ -53,10 +54,13 @@ fn main() -> io::Result<()> {
             traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender);
         });
         
+        let mut tarball_size = 0;
+        
         while let Ok(entry) = reciever.recv() {
             match tar::serialize(&entry, &mut tarball) {
-                Ok(_) => {
-                    eprintln!("{:?}", entry.path);
+                Ok(size) => {
+                    tarball_size += size;
+                    //eprintln!("{:?}", entry.path);
                 },
                 Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.path, e)
             }
@@ -64,8 +68,10 @@ fn main() -> io::Result<()> {
         
         tarball.write_all(&vec![0; 1024]).unwrap();
         tarball.flush().unwrap();
+        
+        let write_time = start_instant.elapsed();
 
-        eprintln!("Done");
+        eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
     });
     
     Ok(())

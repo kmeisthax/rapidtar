@@ -65,9 +65,15 @@ pub fn headergen(basepath: &path::Path, entry: &fs::DirEntry) -> traverse::Trave
 
 /// Given a traversal result, attempt to serialize it's data as tar format data
 /// in the given tarball writer.
-pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write) -> io::Result<()> {
+/// 
+/// Returns the number of bytes written to the file/tape.
+pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write) -> io::Result<usize> {
+    let mut tarball_size = 0;
+    
     match traversal.tarheader {
         Ok(ref header) => {
+            tarball_size += header.len();
+            
             tarball.write_all(&header)?;
             
             if !traversal.filedata_in_header {
@@ -77,6 +83,8 @@ pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write)
                 //at once at the end of the archive
                 let mut source_file = fs::File::open(traversal.path.as_ref())?;
                 let written_size = io::copy(&mut source_file, tarball)?;
+                
+                tarball_size += written_size as usize;
 
                 if written_size != traversal.expected_data_size {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.path, (traversal.expected_data_size - written_size))));
@@ -84,11 +92,12 @@ pub fn serialize(traversal: &traverse::TraversalResult, tarball: &mut io::Write)
                 
                 let padding_needed = (written_size % 512) as usize;
                 if padding_needed != 0 {
+                    tarball_size += padding_needed;
                     tarball.write_all(&vec![0; 512 - padding_needed])?;
                 }
             }
             
-            Ok(())
+            Ok((tarball_size))
         },
         Err(ref x) => return Err(io::Error::new(x.kind(), format!("{:?}", x)))
     }
