@@ -52,9 +52,9 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 /// components on all platforms. Platforms whose paths may contain invalid
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
-pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
+pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path, prefixpath: Option<&path::Path>) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
     //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
-    let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
+    let relapath = prefixpath.unwrap_or(path::Path::new("")).join(diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?);
     let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
     let mut first = true;
     let mut is_ascii = true;
@@ -235,7 +235,7 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 ///   ever.
 pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
     //First, compute the PAX extended header stream
-    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath)?;
+    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath, None)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -267,10 +267,7 @@ pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Ve
     
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
-        let padding_needed = (extended_stream.len() % 512) as usize;
-        if padding_needed != 0 {
-            extended_stream.extend(&vec![0; 512 - padding_needed]);
-        }
+        let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath, Some(path::Path::new("./PaxHeaders")))?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
@@ -288,11 +285,16 @@ pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Ve
         header.extend("00".as_bytes()); //version 00
         header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
         header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
-        header.extend(vec![0; 8]); //TODO: Device Major
-        header.extend(vec![0; 8]); //TODO: Device Minor
+        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
+        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
         header.extend(&relapath_extended);
         header.extend(vec![0; 12]); //padding
-
+        
+        let padding_needed = (extended_stream.len() % 512) as usize;
+        if padding_needed != 0 {
+            extended_stream.extend(&vec![0; 512 - padding_needed]);
+        }
+        
         header.extend(extended_stream); //All the PAX
     }
     
@@ -378,7 +380,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_short() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/quux"), path::Path::new("/bar"), None).unwrap();
         
         assert_eq!(was_truncated, false);
         assert_eq!(old.len(), 100);
@@ -390,7 +392,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_medium() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
         
         assert_eq!(was_truncated, false);
         assert_eq!(old.len(), 100);
@@ -403,7 +405,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_long() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
         
         assert_eq!(was_truncated, true);
         assert_eq!(old.len(), 100);
@@ -415,7 +417,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_long_tricky() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/uqv/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/uqv/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
         
         assert_eq!(was_truncated, true);
         assert_eq!(old.len(), 100);

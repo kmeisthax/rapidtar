@@ -81,8 +81,8 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
-pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, basepath)?;
+pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path, prefixpath: Option<&path::Path>) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, basepath, prefixpath)?;
     
     if was_truncated {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long or contains non-ASCII characters"));
@@ -123,7 +123,7 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
     
     let metadata = dirent.metadata()?;
     
-    let (relapath_unix, relapath_extended) = format_tar_filename(&dirent.path(), basepath)?;
+    let (relapath_unix, relapath_extended) = format_tar_filename(&dirent.path(), basepath, None)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -141,8 +141,8 @@ pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<
     header.extend("00".as_bytes()); //version 00
     header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
     header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
-    header.extend(vec![0; 8]); //TODO: Device Major
-    header.extend(vec![0; 8]); //TODO: Device Minor
+    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Device number is too high"))?); //TODO: Device Major
+    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Device number is too high"))?); //TODO: Device Minor
     header.extend(relapath_extended);
     header.extend(vec![0; 12]); //padding
     
@@ -196,7 +196,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_short() {
-        let (old, posix) = format_tar_filename(path::Path::new("/bar/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("/bar/quux"), path::Path::new("/bar"), None).unwrap();
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
         assert_eq!("quux".as_bytes(), &old[0..4]);
@@ -206,7 +206,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_medium() {
-        let (old, posix) = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
         
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
@@ -218,7 +218,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_long() {
-        let my_err = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar")).unwrap_err();
+        let my_err = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap_err();
         
         assert_eq!(my_err.kind(), io::ErrorKind::InvalidData);
     }
