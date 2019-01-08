@@ -12,3 +12,7 @@ num = "0.2.0"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
+
+[[bin]]
+name = "rapidtar"
+path = "src/endpoint_tar.rs"
