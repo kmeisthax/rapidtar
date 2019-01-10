@@ -28,13 +28,13 @@ pub enum TarFileType {
 impl TarFileType {
     pub fn type_flag(&self) -> char {
         match self {
-            FileStream => '0',
-            HardLink => '1',
-            SymbolicLink => '2',
-            CharacterDevice => '3',
-            BlockDevice => '4',
-            Directory => '5',
-            FIFOPipe => '6',
+            TarFileType::FileStream => '0',
+            TarFileType::HardLink => '1',
+            TarFileType::SymbolicLink => '2',
+            TarFileType::CharacterDevice => '3',
+            TarFileType::BlockDevice => '4',
+            TarFileType::Directory => '5',
+            TarFileType::FIFOPipe => '6',
             TarFileType::Other(f) => f.clone()
         }
     }
@@ -101,7 +101,7 @@ pub fn headergen(basepath: &path::Path, entry_path: &path::Path, entry_metadata:
     tar::pax::checksum_header(&mut concrete_tarheader);
     
     let readahead = match tarheader.file_type {
-        FileStream => {
+        TarFileType::FileStream => {
             let cache_len = cmp::min(tarheader.file_size, 1*1024*1024);
             let mut filebuf = Vec::with_capacity(cache_len as usize);
 
@@ -172,21 +172,24 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
     tarball_size += traversal.encoded_header.len() as u64;
     tarball.write_all(&traversal.encoded_header)?;
     
-    let mut source_file = fs::File::open(traversal.tar_header.path.as_ref())?;
-    
-    if let Some(ref readahead) = traversal.file_prefix {
-        tarball_size += readahead.len() as u64;
-        tarball.write_all(&readahead)?;
-        
-        source_file.seek(io::SeekFrom::Current(readahead.len() as i64));
-    }
-    
-    tarball_size += io::copy(&mut source_file, tarball)?;
-    
-    let expected_size = traversal.encoded_header.len() as u64 + traversal.tar_header.file_size;
-    
-    if tarball_size != expected_size {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.tar_header.path, (expected_size - tarball_size))));
+    if let TarFileType::FileStream = traversal.tar_header.file_type {
+        let mut source_file = fs::File::open(traversal.tar_header.path.as_ref())?;
+
+        if let Some(ref readahead) = traversal.file_prefix {
+            tarball_size += readahead.len() as u64;
+            tarball.write_all(&readahead)?;
+
+            source_file.seek(io::SeekFrom::Current(readahead.len() as i64));
+        }
+
+        tarball_size += io::copy(&mut source_file, tarball)?;
+
+        let expected_size = traversal.encoded_header.len() as u64 + traversal.tar_header.file_size;
+
+        if tarball_size != expected_size {
+            //TODO: If we error out the write count is wrong. Need an out-of-bound error reporting mechanism.
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.tar_header.path, (expected_size - tarball_size))));
+        }
     }
     
     let padding_needed = (tarball_size % 512);
