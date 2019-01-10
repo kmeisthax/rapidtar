@@ -1,13 +1,16 @@
-use std::{io, fs, path, time};
+use std::{io, fs, path, time, fmt};
 use pad::{PadStr, Alignment};
 use pathdiff::diff_paths;
 use rapidtar::tar::pax;
+use rapidtar::tar::TarHeader;
+use num;
+use num_traits;
 
 /// Format a number in tar octal format, with a trailing null.
 /// 
 /// If the number is too large to fit, this function yields None.
-pub fn format_tar_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
-    let numsize = (number as f32).log(8.0);
+pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + num_traits::cast::ToPrimitive {
+    let numsize = number.to_f32()?.log(8.0);
     
     if numsize >= (field_size as f32 - 1.0) {
         None
@@ -15,7 +18,6 @@ pub fn format_tar_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
         let mut value = format!("{:o}", number).pad(field_size - 1, '0', Alignment::Right, true).into_bytes();
         
         value.push(0);
-        assert_eq!(value.len(), field_size);
         
         Some(value)
     }
@@ -31,33 +33,6 @@ pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>>
         Some(result)
     } else {
         None
-    }
-}
-
-/// Given a directory entry, produce valid TAR mode bits for it.
-/// 
-/// This is the UNIX version of the function. It pulls the mode bits from the OS
-/// to generate the tar mode.
-#[cfg(unix)]
-pub fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
-    use std::os::unix::fs::PermissionsExt;
-    
-    format_tar_numeral(dirent.metadata()?.permissions().mode(), 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar numeral too large"))
-}
-
-/// Given a directory entry, produce valid TAR mode bits for it.
-/// 
-/// This is the GENERIC version of the function. It creates a plausible set of
-/// mode bits for platforms that don't provide more of them.
-/// 
-/// TODO: Make a Windows (NT?) version of this that queries the Security API to
-/// produce plausible mode bits.
-#[cfg(not(unix))]
-pub fn format_tar_mode(dirent: &fs::DirEntry) -> io::Result<Vec<u8>> {
-    if dirent.metadata()?.permissions().readonly() {
-        format_tar_numeral(0o444, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar mode numeral too large... somehow"))
-    } else {
-        format_tar_numeral(0o644, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar mode numeral too large... somehow"))
     }
 }
 
@@ -118,31 +93,29 @@ pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path, prefixpa
 /// checksum field filled with spaces. This is the format necessary to actually
 /// checksum a tar header. Once you have computed your checksum, overwrite the
 /// checksum bytes with the lower six octal characters of the checksum.
-pub fn ustar_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
+pub fn ustar_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
     let mut header : Vec<u8> = Vec::with_capacity(512);
     
-    let metadata = dirent.metadata()?;
-    
-    let (relapath_unix, relapath_extended) = format_tar_filename(&dirent.path(), basepath, None)?;
+    let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path, basepath, None)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
     
     header.extend(relapath_unix); //Last 100 bytes of path
-    header.extend(format_tar_mode(dirent)?); //mode
-    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID is too high"))?); //TODO: UID
-    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID is too high"))?); //TODO: GID
-    header.extend(format_tar_numeral(metadata.len(), 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, format!("File is larger than USTAR file limit (8GB), length is {}", metadata.len())))?); //File size
-    header.extend(format_tar_time(&metadata.modified()?)?); //mtime
+    header.extend(format_tar_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
+    header.extend(format_tar_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
+    header.extend(format_tar_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
+    header.extend(format_tar_numeral(tarheader.file_size, 12).unwrap_or(vec![0; 12])); //File size
+    header.extend(format_tar_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
     header.extend("        ".as_bytes()); //checksummable format checksum value
     header.extend("0".as_bytes()); //TODO: Link type / file type
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
-    header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
-    header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
-    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Device number is too high"))?); //TODO: Device Major
-    header.extend(format_tar_numeral(0, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Device number is too high"))?); //TODO: Device Minor
+    header.extend(format_tar_string(&tarheader.unix_uname, 32).unwrap_or(vec![0; 8])); //TODO: UID Name
+    header.extend(format_tar_string(&tarheader.unix_gname, 32).unwrap_or(vec![0; 8])); //TODO: GID Name
+    header.extend(format_tar_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
+    header.extend(format_tar_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
     header.extend(relapath_extended);
     header.extend(vec![0; 12]); //padding
     

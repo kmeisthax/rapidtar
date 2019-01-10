@@ -1,8 +1,9 @@
 use std::{io, path, fs, time, cmp};
 use pathdiff::diff_paths;
 use rapidtar::tar::ustar;
-use rapidtar::tar::ustar::{format_tar_numeral, format_tar_filename, format_tar_mode, format_tar_string};
+use rapidtar::tar::ustar::{format_tar_numeral, format_tar_filename, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
+use rapidtar::tar::TarHeader;
 
 /// Format a key-value pair in pax format.
 /// 
@@ -192,7 +193,7 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 ///
 /// # Arguments
 /// 
-/// * `dirent` - The filesystem directory entry being archived.
+/// * `tarheader` - Abstract tar header to be converted into a real one
 /// * `basepath` - The base path of the archival operation. All tarball paths
 ///   will be made relative to this path.
 /// 
@@ -233,33 +234,32 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 /// * Files larger than 1YB will not be extractable on pre-POSIX GNU tar
 ///   implementations. I do not expect this to be a concern for some time, if
 ///   ever.
-pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Vec<u8>> {
+pub fn pax_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
     //First, compute the PAX extended header stream
-    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath, None)?;
+    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&tarheader.path, basepath, None)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
     
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
-    let metadata = dirent.metadata()?;
     
-    if let None = format_tar_numeral(metadata.len(), 12) {
-        extended_stream.extend(format_pax_attribute("size", &format!("{}", metadata.len())));
+    if let None = format_tar_numeral(tarheader.file_size, 12) {
+        extended_stream.extend(format_pax_attribute("size", &format!("{}", tarheader.file_size)));
     }
     
     if legacy_format_truncated {
-        extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&dirent.path(), basepath)?));
+        extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&tarheader.path, basepath)?));
     }
     
-    if let Ok(mtime) = metadata.modified() {
+    if let Some(mtime) = tarheader.mtime {
         extended_stream.extend(format_pax_attribute("mtime", &format_pax_time(&mtime)?));
     }
     
-    if let Ok(atime) = metadata.accessed() {
+    if let Some(atime) = tarheader.atime {
         extended_stream.extend(format_pax_attribute("atime", &format_pax_time(&atime)?));
     }
     
-    if let Ok(birthtime) = metadata.created() {
+    if let Some(birthtime) = tarheader.birthtime {
         extended_stream.extend(format_pax_attribute("LIBARCHIVE.creationtime", &format_pax_time(&birthtime)?));
     }
     
@@ -267,26 +267,26 @@ pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Ve
     
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
-        let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&dirent.path(), basepath, Some(path::Path::new("./PaxHeaders")))?;
+        let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&tarheader.path, basepath, Some(path::Path::new("./PaxHeaders")))?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
         //behavior.
         header.extend(&relapath_unix); //Last 100 bytes of path
-        header.extend(format_tar_mode(dirent)?); //mode
-        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: UID
-        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: GID
+        header.extend(format_gnu_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
+        header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
+        header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
         header.extend(format_gnu_numeral(extended_stream.len() as u64, 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File extended header is too long"))?); //File size
-        header.extend(format_gnu_time(&metadata.modified()?).unwrap_or(vec![0; 12])); //mtime
+        header.extend(format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
         header.extend("        ".as_bytes()); //checksummable format checksum value
-        header.extend("x".as_bytes()); //TODO: Link type / file type
+        header.extend("x".as_bytes());
         header.extend(vec![0; 100]); //TODO: Link name
         header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
         header.extend("00".as_bytes()); //version 00
-        header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
-        header.extend(format_tar_string("root", 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
-        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
-        header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
+        header.extend(format_tar_string(&tarheader.unix_uname, 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
+        header.extend(format_tar_string(&tarheader.unix_gname, 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
+        header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
+        header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
         header.extend(&relapath_extended);
         header.extend(vec![0; 12]); //padding
         
@@ -299,20 +299,20 @@ pub fn pax_header(dirent: &fs::DirEntry, basepath: &path::Path) -> io::Result<Ve
     }
     
     header.extend(relapath_unix); //Last 100 bytes of path
-    header.extend(format_tar_mode(dirent)?); //mode
-    header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: UID
-    header.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: GID
-    header.extend(format_gnu_numeral(metadata.len(), 12).unwrap_or(vec![0; 12])); //File size
-    header.extend(format_gnu_time(&metadata.modified()?).unwrap_or(vec![0; 12])); //mtime
+    header.extend(format_gnu_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
+    header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
+    header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
+    header.extend(format_gnu_numeral(tarheader.file_size, 12).unwrap_or(vec![0; 12])); //File size
+    header.extend(format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
     header.extend("        ".as_bytes()); //checksummable format checksum value
     header.extend("0".as_bytes()); //TODO: Link type / file type
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
-    header.extend(format_tar_string("root", 32).unwrap_or(vec![0; 8])); //TODO: UID Name
-    header.extend(format_tar_string("root", 32).unwrap_or(vec![0; 8])); //TODO: GID Name
-    header.extend(vec![0; 8]); //TODO: Device Major
-    header.extend(vec![0; 8]); //TODO: Device Minor
+    header.extend(format_tar_string(&tarheader.unix_uname, 32).unwrap_or(vec![0; 8])); //TODO: UID Name
+    header.extend(format_tar_string(&tarheader.unix_gname, 32).unwrap_or(vec![0; 8])); //TODO: GID Name
+    header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
+    header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
     header.extend(relapath_extended);
     header.extend(vec![0; 12]); //padding
     

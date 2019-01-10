@@ -1,5 +1,8 @@
-use std::{io, time};
+use std::{io, time, fmt, ops, convert};
 use pad::{PadStr, Alignment};
+use num;
+use num::ToPrimitive;
+use num_traits;
 
 /// Format a number in GNU/STAR octal/integer hybrid format.
 /// 
@@ -13,9 +16,9 @@ use pad::{PadStr, Alignment};
 /// 
 /// In the event that the number cannot be represented in even this form, the
 /// function yields None.
-pub fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
-    let numsize = (number as f32).log(8.0);
-    let gnusize = (number as f32).log(256.0);
+pub fn format_gnu_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + num::traits::CheckedShr + std::ops::BitAnd + num_traits::cast::ToPrimitive + From<u8>, <N as std::ops::BitAnd>::Output: num_traits::cast::ToPrimitive {
+    let numsize = number.to_f32()?.log(8.0);
+    let gnusize = number.to_f32()?.log(256.0);
     
     if gnusize >= (field_size as f32 - 1.0) {
         None
@@ -28,7 +31,7 @@ pub fn format_gnu_numeral(number: u64, field_size: usize) -> Option<Vec<u8>> {
             //Who the hell in their right mind decided shifting by more than the
             //register size is UB? Who the hell thought it should be remedied
             //with a thread panic!?
-            result[field_size - i - 1] = ((number.checked_shr(i as u32 * 8).unwrap_or(0)) & 0xFF) as u8;
+            result[field_size - i - 1] = ((number.checked_shr(i as u32 * 8).unwrap_or(N::from(0))) & N::from(0xFF)).to_u8().unwrap();
         }
         
         Some(result)
@@ -70,7 +73,7 @@ mod tests {
     
     #[test]
     fn format_gnu_numeral_8_verylarge() {
-        assert!(match format_gnu_numeral(0xDEADBEEFDEADBEEF, 8) {
+        assert!(match format_gnu_numeral(0xDEADBEEFDEADBEEF as u64, 8) {
             Some(_) => false,
             None => true
         });

@@ -3,6 +3,7 @@ extern crate pad;
 extern crate pathdiff;
 extern crate argparse;
 extern crate num;
+extern crate num_traits;
 
 #[cfg(windows)]
 extern crate winapi;
@@ -11,7 +12,7 @@ mod rapidtar;
 
 use argparse::{ArgumentParser, Store};
 use std::{io, fs, path, thread, time};
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use rapidtar::{tar, traverse, blocking};
 use rapidtar::fs::open_sink;
 
@@ -30,6 +31,9 @@ fn main() -> io::Result<()> {
         
         ap.set_description("Create an archive file from a given directory's contents in parallel.");
         
+        //TODO: tar takes traversal paths, not basepaths. Basepath is implicitly
+        // ./ until overridden, whereas we treat it as both base path and
+        //traversal path.
         ap.refer(&mut basepath).add_argument("basepath", Store, "The directory whose contents should be archived");
         ap.refer(&mut outfile).add_argument("outfile", Store, "The file to write the archive to");
         ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
@@ -47,11 +51,14 @@ fn main() -> io::Result<()> {
     
     rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
         let start_instant = time::Instant::now();
-        let reciever : Receiver<traverse::TraversalResult> = reciever;
+        let reciever : Receiver<tar::HeaderGenResult> = reciever;
         let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
         s.spawn(move |s| {
-            traverse::traverse(basepath.clone(), basepath, tar::headergen, s, &sender);
+            traverse::traverse(basepath.clone(), &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                c.send(tar::headergen(basepath.as_ref(), path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                Ok(())
+            }, sender);
         });
         
         let mut tarball_size = 0;
@@ -62,7 +69,7 @@ fn main() -> io::Result<()> {
                     tarball_size += size;
                     //eprintln!("{:?}", entry.path);
                 },
-                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.path, e)
+                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.tar_header.path, e)
             }
         }
         

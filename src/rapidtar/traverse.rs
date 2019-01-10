@@ -1,55 +1,58 @@
 use std::sync::mpsc::{SyncSender};
-use std::{io, path, fs};
+use std::{io, path, fs, time};
 use rayon::Scope;
 
 pub struct TraversalResult {
     pub path: Box<path::PathBuf>,
-    pub expected_data_size: u64,
-    pub tarheader: io::Result<Vec<u8>>,
-    pub filedata_in_header: bool
+    pub symlink_path: Option<Box<path::PathBuf>>,
+    pub filesize: u64,
+    pub mtime: Option<time::SystemTime>,
+    pub atime: Option<time::SystemTime>,
+    pub birthtime: Option<time::SystemTime>,
+    pub is_file: bool,
 }
 
 /// Traverse a directory and stream it and it's contents into memory.
 /// 
 /// Traversal occurs in a multi-threaded manner to maximize I/O queue
-/// utilization. Traversal results will be returned on the channel `c`. Each
-/// file and directory encountered will spawn additional threads according to
-/// Rayon's job queueing algorithm. The given `archive_header_fn` will be called
-/// within said tasks to summarize a given file or directory entry into a
-/// `TraversalResult`.
-pub fn traverse<'a, P: AsRef<path::Path>, Q: AsRef<path::Path>>(basepath: P, path: Q, archive_header_fn: fn(&path::Path, &fs::DirEntry) -> TraversalResult, s: &Scope, c: &SyncSender<TraversalResult>) -> io::Result<()> where P: Send + Sync + Clone + 'static, Q: Send + Sync + Clone {
-    let paths = fs::read_dir(path)?;
+/// utilization. The given `archive_header_fn` will be called within said tasks
+/// with a special struct called a TraversalResult which it may then do with
+/// what it will.
+/// 
+/// # Multithreaded communication
+/// 
+/// For convenience we also allow the caller to provide a `SyncSender` which
+/// will be cloned and distributed throughout the job queue.
+pub fn traverse<'a, 'b, P: AsRef<path::Path>, Q, F>(path: P, archive_header_fn: &'a F, c: SyncSender<Q>) -> io::Result<()>
+    where P: Send + Sync + Clone,
+        Q: Send + Sized + 'a,
+        F: Fn(&path::Path, &fs::Metadata, &SyncSender<Q>) -> io::Result<()> + Send + Sync + 'a,
+        'a: 'b {
+    let self_metadata = fs::symlink_metadata(path.clone())?;
     
-    for entry in paths {
-        match entry {
-            Ok(entry) => {
-                let child_c = c.clone();
-                let pathentry = entry.path().clone();
-                let cl_basepath = basepath.clone();
-                
-                if pathentry.is_dir() {
+    archive_header_fn(path.as_ref(), &self_metadata, &c)?;
+    
+    rayon::scope(|s| {
+        if self_metadata.is_dir() {
+            let paths = fs::read_dir(path.clone()).unwrap(); //TODO: We should have a way of reporting errors...
+
+            for entry in paths {
+                if let Ok(entry) = entry {
+                    let pathentry = entry.path();
+                    let child_c = c.clone();
+                    let child_path = entry.path().clone();
+
                     s.spawn(move |s| {
-                        let c = child_c;
                         let pathname_string = format!("{:?}", pathentry);
-                        
-                        match traverse(cl_basepath, pathentry, archive_header_fn, s, &c) {
-                            Ok(_) => {},
-                            Err(e) => {
-                                eprintln!("Error attempting to traverse directory path {:?}, got error {:?}", pathname_string, e);
-                            }
-                        };
-                    });
-                } else if pathentry.is_file() {
-                    s.spawn(move |_| {
-                        let c = child_c;
-                        
-                        c.send(archive_header_fn(cl_basepath.as_ref(), &entry)).unwrap();
+
+                        if let Err(e) = traverse(pathentry, archive_header_fn, child_c) {
+                            eprintln!("Error attempting to traverse directory path {:?}, got error {:?}", pathname_string, e);
+                        }
                     });
                 }
-            },
-            Err(_) => {}
+            }
         }
-    };
+    });
     
     Ok(())
 }
