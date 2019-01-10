@@ -38,10 +38,18 @@ pub fn traverse<'a, 'b, P: AsRef<path::Path>, Q, F>(path: P, archive_header_fn: 
 
             for entry in paths {
                 if let Ok(entry) = entry {
+                    //Do not traverse parent or self directories.
+                    //That way lies madness.
+                    if entry.file_name() == "." || entry.file_name() == ".." {
+                        eprintln!("Error attempting to traverse directory path {:?}, would recurse", entry.path());
+                        continue;
+                    }
+                    
                     let pathentry = entry.path();
+                    
                     let child_c = c.clone();
                     let child_path = entry.path().clone();
-
+                    
                     s.spawn(move |s| {
                         let pathname_string = format!("{:?}", pathentry);
 
