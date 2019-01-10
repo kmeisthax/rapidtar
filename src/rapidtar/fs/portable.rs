@@ -9,10 +9,18 @@ use rapidtar::tar;
 /// TODO: Make a Windows (NT?) version of this that queries the Security API to
 /// produce plausible mode bits.
 pub fn get_unix_mode(metadata: &fs::Metadata) -> io::Result<u32> {
-    if metadata.permissions().readonly() {
-        Ok(0o444)
+    if !metadata.is_dir() {
+        if metadata.permissions().readonly() {
+            Ok(0o444)
+        } else {
+            Ok(0o644)
+        }
     } else {
-        Ok(0o644)
+        if metadata.permissions().readonly() {
+            Ok(0o555)
+        } else {
+            Ok(0o755)
+        }
     }
 }
 
