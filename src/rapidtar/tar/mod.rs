@@ -5,7 +5,7 @@ mod pax;
 use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
 use rapidtar::{tar, traverse};
-use rapidtar::fs::get_unix_mode;
+use rapidtar::fs::{get_unix_mode, get_file_type};
 
 /// An abstract representation of the TAR typeflag field.
 /// 
@@ -23,6 +23,21 @@ pub enum TarFileType {
     Directory,
     FIFOPipe,
     Other(char)
+}
+
+impl TarFileType {
+    pub fn type_flag(&self) -> char {
+        match self {
+            FileStream => '0',
+            HardLink => '1',
+            SymbolicLink => '2',
+            CharacterDevice => '3',
+            BlockDevice => '4',
+            Directory => '5',
+            FIFOPipe => '6',
+            TarFileType::Other(f) => f.clone()
+        }
+    }
 }
 
 /// An abstract representation of the data contained within a tarball header.
@@ -71,7 +86,7 @@ pub fn headergen(basepath: &path::Path, entry_path: &path::Path, entry_metadata:
         mtime: entry_metadata.modified().ok(),
         
         //TODO: All of these are placeholders.
-        file_type: TarFileType::FileStream,
+        file_type: get_file_type(entry_metadata)?,
         symlink_path: None,
         unix_uname: "root".to_string(),
         unix_gname: "root".to_string(),

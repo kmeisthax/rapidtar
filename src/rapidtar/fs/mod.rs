@@ -14,3 +14,6 @@ pub use rapidtar::fs::unix::get_unix_mode;
 
 #[cfg(not(unix))]
 pub use rapidtar::fs::portable::get_unix_mode;
+
+#[cfg(not(unix))]
+pub use rapidtar::fs::portable::get_file_type;

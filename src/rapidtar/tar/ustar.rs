@@ -108,7 +108,7 @@ pub fn ustar_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<
     header.extend(format_tar_numeral(tarheader.file_size, 12).unwrap_or(vec![0; 12])); //File size
     header.extend(format_tar_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
     header.extend("        ".as_bytes()); //checksummable format checksum value
-    header.extend("0".as_bytes()); //TODO: Link type / file type
+    header.push(tarheader.file_type.type_flag() as u8); //File type
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
