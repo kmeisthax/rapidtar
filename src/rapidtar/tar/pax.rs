@@ -43,6 +43,9 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 
 /// Given a directory path, format it for inclusion in a tar header.
 /// 
+/// If the given filetype indicates a directory, then the path will be suffixed
+/// by a path separator.
+/// 
 /// # Returns
 /// 
 /// Two bytestrings, corresponding to the name and prefix fields of the USTAR
@@ -53,7 +56,7 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 /// components on all platforms. Platforms whose paths may contain invalid
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
-pub fn format_pax_legacy_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
+pub fn format_pax_legacy_filename(dirpath: &path::Path, filetype: TarFileType) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
     let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
     let mut first = true;
     let mut is_ascii = true;
@@ -76,6 +79,10 @@ pub fn format_pax_legacy_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, 
             path::Component::ParentDir => relapath_encoded.extend("..".as_bytes()),
             _ => {}
         }
+    }
+    
+    if let TarFileType::Directory = filetype {
+        relapath_encoded.push('/' as u8);
     }
     
     relapath_encoded.push(0);
@@ -236,7 +243,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     }
     
     //First, compute the PAX extended header stream
-    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&item_path)?;
+    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&item_path, tarheader.file_type)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -270,7 +277,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         let mut pax_prefixed_path = tarheader.path.clone().with_file_name("PaxHeaders");
         pax_prefixed_path.push(tarheader.path.file_name().unwrap_or(&ffi::OsString::from(".")));
         
-        let (pax_relapath_unix, pax_relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&pax_prefixed_path)?;
+        let (pax_relapath_unix, pax_relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&pax_prefixed_path, tarheader.file_type)?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
@@ -345,6 +352,7 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 mod tests {
     use std::{io, path};
     use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename};
+    use rapidtar::tar::TarFileType;
     
     #[test]
     fn pax_attribute() {
@@ -383,7 +391,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_short() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("quux"), TarFileType::FileStream).unwrap();
         
         assert_eq!(was_truncated, false);
         assert_eq!(old.len(), 100);
@@ -395,7 +403,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_medium() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap();
         
         assert_eq!(was_truncated, false);
         assert_eq!(old.len(), 100);
@@ -408,7 +416,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_long() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/vqw/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap();
         
         assert_eq!(was_truncated, true);
         assert_eq!(old.len(), 100);
@@ -420,7 +428,7 @@ mod tests {
     
     #[test]
     fn pax_legacy_filename_long_tricky() {
-        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/uqv/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix, was_truncated) = format_pax_legacy_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/uqv/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap();
         
         assert_eq!(was_truncated, true);
         assert_eq!(old.len(), 100);

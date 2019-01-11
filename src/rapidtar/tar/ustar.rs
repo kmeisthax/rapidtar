@@ -2,7 +2,7 @@ use std::{io, fs, path, time, fmt};
 use pad::{PadStr, Alignment};
 use pathdiff::diff_paths;
 use rapidtar::tar::pax;
-use rapidtar::tar::TarHeader;
+use rapidtar::tar::{TarHeader, TarFileType};
 use num;
 use num_traits;
 
@@ -56,8 +56,8 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
-pub fn format_tar_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath)?;
+pub fn format_tar_filename(dirpath: &path::Path, filetype: TarFileType) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, filetype)?;
     
     if was_truncated {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long or contains non-ASCII characters"));
@@ -96,7 +96,7 @@ pub fn format_tar_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>
 pub fn ustar_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
     let mut header : Vec<u8> = Vec::with_capacity(512);
     
-    let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path)?;
+    let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path, tarheader.file_type)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -142,6 +142,7 @@ pub fn checksum_header(header: &mut [u8]) {
 #[cfg(test)]
 mod tests {
     use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
+    use rapidtar::tar::TarFileType;
     use std::{io, path};
     
     #[test]
@@ -169,7 +170,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_short() {
-        let (old, posix) = format_tar_filename(path::Path::new("/bar/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("quux"), TarFileType::FileStream).unwrap();
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
         assert_eq!("quux".as_bytes(), &old[0..4]);
@@ -179,7 +180,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_medium() {
-        let (old, posix) = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap();
+        let (old, posix) = format_tar_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap();
         
         assert_eq!(old.len(), 100);
         assert_eq!(posix.len(), 155);
@@ -191,7 +192,7 @@ mod tests {
     
     #[test]
     fn format_tar_filename_long() {
-        let my_err = format_tar_filename(path::Path::new("/bar/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), path::Path::new("/bar"), None).unwrap_err();
+        let my_err = format_tar_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap_err();
         
         assert_eq!(my_err.kind(), io::ErrorKind::InvalidData);
     }
