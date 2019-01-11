@@ -274,8 +274,20 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
-        let mut pax_prefixed_path = tarheader.path.clone().with_file_name("PaxHeaders");
-        pax_prefixed_path.push(tarheader.path.file_name().unwrap_or(&ffi::OsString::from(".")));
+        let mut component_count = 0;
+        for component in tarheader.path.components() {
+            component_count += 1
+        }
+        
+        let mut pax_prefixed_path : path::PathBuf = tarheader.path.clone().to_path_buf();
+        
+        if component_count > 1 {
+            pax_prefixed_path = pax_prefixed_path.with_file_name("PaxHeaders");
+            pax_prefixed_path.push(tarheader.path.file_name().unwrap_or(&ffi::OsString::from(".")));
+        } else {
+            pax_prefixed_path = path::PathBuf::from(r"./PaxHeaders");
+            pax_prefixed_path.push(tarheader.path.to_path_buf());
+        }
         
         let (pax_relapath_unix, pax_relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&pax_prefixed_path, tarheader.file_type)?;
         
