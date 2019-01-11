@@ -10,8 +10,8 @@ extern crate winapi;
 
 mod rapidtar;
 
-use argparse::{ArgumentParser, Store};
-use std::{io, fs, path, thread, time};
+use argparse::{ArgumentParser, Store, Collect};
+use std::{io, fs, path, thread, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use rapidtar::{tar, traverse, blocking};
 use rapidtar::fs::open_sink;
@@ -21,10 +21,12 @@ use std::io::Write;
 fn main() -> io::Result<()> {
     //Here's some configuration!
     let mut channel_queue_depth = 1024;
-    let mut parallel_io_limit = 512;
+    let mut parallel_io_limit = 32;
     let mut blocking_factor = 20; //TAR standard, but suboptimal for modern tape
-    let mut basepath = ".".to_string();
+    let mut basepath = std::env::current_dir()?.to_string_lossy().to_mut().to_string(); //TODO: If no current working directory exists rapidtar doesn't work.
+        //TODO: If CWD is not a valid Unicode string the default basepath makes no sense.
     let mut outfile = "out.tar".to_string();
+    let mut traversal_list : Vec<String> = Vec::new();
     
     {
         let mut ap = ArgumentParser::new();
@@ -34,11 +36,12 @@ fn main() -> io::Result<()> {
         //TODO: tar takes traversal paths, not basepaths. Basepath is implicitly
         // ./ until overridden, whereas we treat it as both base path and
         //traversal path.
-        ap.refer(&mut basepath).add_argument("basepath", Store, "The directory whose contents should be archived");
-        ap.refer(&mut outfile).add_argument("outfile", Store, "The file to write the archive to");
+        ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
+        ap.refer(&mut basepath).add_option(&["--basepath"], Store, "The base path of the archival operation. Defaults to current working directory.");
         ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
         ap.refer(&mut blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
+        ap.refer(&mut traversal_list).add_argument("file", Collect, "The files to archive");
         
         ap.parse_args_or_exit();
     }
@@ -54,12 +57,19 @@ fn main() -> io::Result<()> {
         let reciever : Receiver<tar::HeaderGenResult> = reciever;
         let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
-        s.spawn(move |s| {
-            traverse::traverse(basepath.clone(), &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                c.send(tar::headergen(basepath.as_ref(), path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
-                Ok(())
-            }, sender);
-        });
+        for traversal_path in traversal_list {
+            let child_basepath = basepath.clone();
+            let child_sender = sender.clone();
+            
+            s.spawn(move |s| {
+                traverse::traverse(traversal_path.clone(), &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                    c.send(tar::headergen(child_basepath.as_ref(), path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                    Ok(())
+                }, child_sender);
+            });
+        }
+        
+        drop(sender); //Kill the original sender, else the whole thread network deadlocks.
         
         let mut tarball_size = 0;
         
@@ -67,7 +77,7 @@ fn main() -> io::Result<()> {
             match tar::serialize(&entry, &mut tarball) {
                 Ok(size) => {
                     tarball_size += size;
-                    //eprintln!("{:?}", entry.path);
+                    eprintln!("{:?}", entry.tar_header.path);
                 },
                 Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.tar_header.path, e)
             }
