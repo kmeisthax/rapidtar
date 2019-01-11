@@ -58,12 +58,11 @@ fn main() -> io::Result<()> {
         let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
         for traversal_path in traversal_list {
-            let child_basepath = basepath.clone();
             let child_sender = sender.clone();
             
             s.spawn(move |s| {
                 traverse::traverse(traversal_path.clone(), &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                    c.send(tar::headergen(child_basepath.as_ref(), path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                    c.send(tar::headergen(path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                     Ok(())
                 }, child_sender);
             });

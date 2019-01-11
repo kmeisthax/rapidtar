@@ -43,7 +43,7 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
     }
 }
 
-/// Given a directory path, split and format it for inclusion in a tar header.
+/// Given a directory path, format it for inclusion in a tar header.
 /// 
 /// # Returns
 /// 
@@ -56,8 +56,8 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// 
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
-pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path, prefixpath: Option<&path::Path>) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, basepath, prefixpath)?;
+pub fn format_tar_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>)> {
+    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath)?;
     
     if was_truncated {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long or contains non-ASCII characters"));
@@ -96,7 +96,7 @@ pub fn format_tar_filename(dirpath: &path::Path, basepath: &path::Path, prefixpa
 pub fn ustar_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
     let mut header : Vec<u8> = Vec::with_capacity(512);
     
-    let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path, basepath, None)?;
+    let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);

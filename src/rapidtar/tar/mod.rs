@@ -66,15 +66,15 @@ pub struct HeaderGenResult {
     pub file_prefix: Option<Vec<u8>>
 }
 
-/// Given a directory entry, and the current traversal basepath, produce a valid
-/// HeaderGenResult for a given path.
+/// Given a directory entry's path and metadata, produce a valid HeaderGenResult
+/// for a given path.
 /// 
 /// headergen attempts to precache the file's contents in the HeaderGenResult.
 /// A maximum of 1MB is read and stored in the HeaderGenResult. If the read
 /// fails or the item is not a file then the file_prefix field will be None.
 /// 
 /// TODO: Make headergen read-ahead caching maximum configurable.
-pub fn headergen(basepath: &path::Path, entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
+pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
     let tarheader = TarHeader {
         path: Box::new(entry_path.clone().to_path_buf()),
         unix_mode: get_unix_mode(entry_metadata)?,
@@ -97,7 +97,7 @@ pub fn headergen(basepath: &path::Path, entry_path: &path::Path, entry_metadata:
         birthtime: entry_metadata.created().ok(),
     };
     
-    let mut concrete_tarheader = tar::pax::pax_header(&tarheader, basepath)?;
+    let mut concrete_tarheader = tar::pax::pax_header(&tarheader)?;
     tar::pax::checksum_header(&mut concrete_tarheader);
     
     let readahead = match tarheader.file_type {

@@ -1,9 +1,9 @@
-use std::{io, path, fs, time, cmp};
+use std::{io, path, fs, time, cmp, ffi};
 use pathdiff::diff_paths;
 use rapidtar::tar::ustar;
 use rapidtar::tar::ustar::{format_tar_numeral, format_tar_filename, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
-use rapidtar::tar::TarHeader;
+use rapidtar::tar::{TarHeader, TarFileType};
 
 /// Format a key-value pair in pax format.
 /// 
@@ -41,7 +41,7 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
     }
 }
 
-/// Given a directory path, split and format it for inclusion in a tar header.
+/// Given a directory path, format it for inclusion in a tar header.
 /// 
 /// # Returns
 /// 
@@ -53,14 +53,12 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 /// components on all platforms. Platforms whose paths may contain invalid
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
-pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path, prefixpath: Option<&path::Path>) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
-    //let relapath = diff_paths(dirpath, basepath).unwrap().to_string_lossy().into_owned().into_bytes();
-    let relapath = prefixpath.unwrap_or(path::Path::new("")).join(diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?);
+pub fn format_pax_legacy_filename(dirpath: &path::Path) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
     let mut relapath_encoded : Vec<u8> = Vec::with_capacity(255);
     let mut first = true;
     let mut is_ascii = true;
     
-    for component in relapath.components() {
+    for component in dirpath.components() {
         if !first {
             relapath_encoded.push('/' as u8);
         } else {
@@ -157,18 +155,17 @@ pub fn format_pax_legacy_filename(dirpath: &path::Path, basepath: &path::Path, p
 /// 
 /// # Returns
 /// 
-/// One string containing the path, relative to the given basepath.
+/// One string containing the path.
 /// 
 /// Paths will be formatted with forward slashes separating UTF-8 encoded path
 /// components on all platforms. Platforms whose paths may contain invalid
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
-fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Result<String> {
-    let relapath = diff_paths(dirpath, basepath).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Invalid base path"))?;
+fn format_pax_filename(dirpath: &path::Path) -> io::Result<String> {
     let mut relapath_fixed = String::with_capacity(255);
     let mut first = true;
     
-    for component in relapath.components() {
+    for component in dirpath.components() {
         if !first {
             relapath_fixed.extend("/".chars());
         } else {
@@ -194,8 +191,6 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 /// # Arguments
 /// 
 /// * `tarheader` - Abstract tar header to be converted into a real one
-/// * `basepath` - The base path of the archival operation. All tarball paths
-///   will be made relative to this path.
 /// 
 /// # Returns
 /// 
@@ -234,9 +229,14 @@ fn format_pax_filename(dirpath: &path::Path, basepath: &path::Path) -> io::Resul
 /// * Files larger than 1YB will not be extractable on pre-POSIX GNU tar
 ///   implementations. I do not expect this to be a concern for some time, if
 ///   ever.
-pub fn pax_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
+pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
+    let mut item_path = tarheader.path.clone();
+    if let TarFileType::Directory = tarheader.file_type {
+        item_path.push(&ffi::OsString::from(""));
+    }
+    
     //First, compute the PAX extended header stream
-    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&tarheader.path, basepath, None)?;
+    let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&item_path)?;
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
@@ -248,7 +248,7 @@ pub fn pax_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Ve
     }
     
     if legacy_format_truncated {
-        extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&tarheader.path, basepath)?));
+        extended_stream.extend(format_pax_attribute("path", &format_pax_filename(&item_path)?));
     }
     
     if let Some(mtime) = tarheader.mtime {
@@ -267,12 +267,15 @@ pub fn pax_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Ve
     
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
-        let (relapath_unix, relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&tarheader.path, basepath, Some(path::Path::new("./PaxHeaders")))?;
+        let mut pax_prefixed_path = tarheader.path.clone().with_file_name("PaxHeaders");
+        pax_prefixed_path.push(tarheader.path.file_name().unwrap_or(&ffi::OsString::from(".")));
+        
+        let (pax_relapath_unix, pax_relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&pax_prefixed_path)?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
         //behavior.
-        header.extend(&relapath_unix); //Last 100 bytes of path
+        header.extend(pax_relapath_unix); //Last 100 bytes of path
         header.extend(format_gnu_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
         header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
         header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
@@ -287,7 +290,7 @@ pub fn pax_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Ve
         header.extend(format_tar_string(&tarheader.unix_gname, 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
         header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
         header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
-        header.extend(&relapath_extended);
+        header.extend(pax_relapath_extended);
         header.extend(vec![0; 12]); //padding
         
         let padding_needed = (extended_stream.len() % 512) as usize;
