@@ -1,4 +1,4 @@
-use std::{io, time, fmt, ops, convert};
+use std::{io, time, fmt};
 use pad::{PadStr, Alignment};
 use num;
 use num::ToPrimitive;

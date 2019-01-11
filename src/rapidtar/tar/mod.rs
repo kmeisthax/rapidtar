@@ -4,7 +4,6 @@ mod pax;
 
 use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
-use rapidtar::{tar, traverse};
 use rapidtar::fs::{get_unix_mode, get_file_type};
 
 /// An abstract representation of the TAR typeflag field.
@@ -97,8 +96,8 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
         birthtime: entry_metadata.created().ok(),
     };
     
-    let mut concrete_tarheader = tar::pax::pax_header(&tarheader)?;
-    tar::pax::checksum_header(&mut concrete_tarheader);
+    let mut concrete_tarheader = pax::pax_header(&tarheader)?;
+    pax::checksum_header(&mut concrete_tarheader);
     
     let readahead = match tarheader.file_type {
         TarFileType::FileStream => {
@@ -124,11 +123,11 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
                             Ok(size) => {
                                 final_cache_len += size;
 
-                                if (size == 0 || final_cache_len == filebuf.len()) {
+                                if size == 0 || final_cache_len == filebuf.len() {
                                     break;
                                 }
 
-                                if (cache_len == final_cache_len as u64) {
+                                if cache_len == final_cache_len as u64 {
                                     break;
                                 }
                             },
@@ -151,7 +150,7 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
                     
                     Some(filebuf)
                 },
-                Err(e) => {
+                Err(_) => {
                     None
                 }
             }
@@ -179,7 +178,7 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
             tarball_size += readahead.len() as u64;
             tarball.write_all(&readahead)?;
 
-            source_file.seek(io::SeekFrom::Current(readahead.len() as i64));
+            source_file.seek(io::SeekFrom::Current(readahead.len() as i64))?;
         }
 
         tarball_size += io::copy(&mut source_file, tarball)?;
@@ -192,11 +191,11 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
         }
     }
     
-    let padding_needed = (tarball_size % 512);
+    let padding_needed = tarball_size % 512;
     if padding_needed != 0 {
         tarball_size += padding_needed;
         tarball.write_all(&vec![0; (512 - padding_needed) as usize])?;
     }
     
-    Ok((tarball_size))
+    Ok(tarball_size)
 }

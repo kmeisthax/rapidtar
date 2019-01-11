@@ -1,23 +1,11 @@
 use std::sync::mpsc::{SyncSender};
-use std::{io, path, fs, time};
-use rayon::Scope;
-
-pub struct TraversalResult {
-    pub path: Box<path::PathBuf>,
-    pub symlink_path: Option<Box<path::PathBuf>>,
-    pub filesize: u64,
-    pub mtime: Option<time::SystemTime>,
-    pub atime: Option<time::SystemTime>,
-    pub birthtime: Option<time::SystemTime>,
-    pub is_file: bool,
-}
+use std::{io, path, fs};
 
 /// Traverse a directory and stream it and it's contents into memory.
 /// 
 /// Traversal occurs in a multi-threaded manner to maximize I/O queue
 /// utilization. The given `archive_header_fn` will be called within said tasks
-/// with a special struct called a TraversalResult which it may then do with
-/// what it will.
+/// with the file name and non-symlink metadata to do with as it wishes.
 /// 
 /// # Multithreaded communication
 /// 
@@ -47,9 +35,8 @@ pub fn traverse<'a, 'b, P: AsRef<path::Path>, Q, F>(path: P, archive_header_fn: 
                     let pathentry = entry.path();
                     
                     let child_c = c.clone();
-                    let child_path = entry.path().clone();
                     
-                    s.spawn(move |s| {
+                    s.spawn(move |_| {
                         let pathname_string = format!("{:?}", pathentry);
 
                         if let Err(e) = traverse(pathentry, archive_header_fn, child_c) {

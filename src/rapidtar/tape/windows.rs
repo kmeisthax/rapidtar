@@ -2,9 +2,9 @@ use std::{io, ptr, fmt, ffi};
 use std::os::windows::ffi::OsStrExt;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
-use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD, LPDWORD};
+use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
 use winapi::shared::winerror::NO_ERROR;
-use winapi::um::winnt::{LPCWSTR, WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -66,7 +66,7 @@ impl io::Write for WindowsTapeDevice {
         let mut write_count : DWORD = 0;
         
         if unsafe { fileapi::WriteFile(self.tape_device, buf.as_ptr() as LPCVOID, buf.len() as DWORD, &mut write_count, ptr::null_mut()) } == TRUE as BOOL {
-            Ok((write_count as usize))
+            Ok(write_count as usize)
         } else {
             Err(io::Error::last_os_error())
         }

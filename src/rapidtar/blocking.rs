@@ -119,7 +119,7 @@ impl<W:Write> Write for BlockingWriter<W> {
     /// lost if the client failed to write a correctly divisible number of bytes
     /// instead.
     fn flush(&mut self) -> io::Result<()> {
-        if (self.block.len() < self.blocking_factor) {
+        if self.block.len() < self.blocking_factor {
             self.block.resize(self.blocking_factor, 0);
         }
         

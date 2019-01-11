@@ -1,4 +1,4 @@
-use std::{io, fs, path, time, fmt};
+use std::{io, path, time, fmt};
 use pad::{PadStr, Alignment};
 use pathdiff::diff_paths;
 use rapidtar::tar::pax;
@@ -93,7 +93,7 @@ pub fn format_tar_filename(dirpath: &path::Path, filetype: TarFileType) -> io::R
 /// checksum field filled with spaces. This is the format necessary to actually
 /// checksum a tar header. Once you have computed your checksum, overwrite the
 /// checksum bytes with the lower six octal characters of the checksum.
-pub fn ustar_header(tarheader: &TarHeader, basepath: &path::Path) -> io::Result<Vec<u8>> {
+pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     let mut header : Vec<u8> = Vec::with_capacity(512);
     
     let (relapath_unix, relapath_extended) = format_tar_filename(&tarheader.path, tarheader.file_type)?;

@@ -1,7 +1,6 @@
-use std::{io, path, fs, time, cmp, ffi};
-use pathdiff::diff_paths;
+use std::{io, path, time, ffi};
 use rapidtar::tar::ustar;
-use rapidtar::tar::ustar::{format_tar_numeral, format_tar_filename, format_tar_string};
+use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
 use rapidtar::tar::{TarHeader, TarFileType};
 
@@ -275,7 +274,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
         let mut component_count = 0;
-        for component in tarheader.path.components() {
+        for _ in tarheader.path.components() {
             component_count += 1
         }
         
@@ -289,7 +288,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
             pax_prefixed_path.push(tarheader.path.to_path_buf());
         }
         
-        let (pax_relapath_unix, pax_relapath_extended, legacy_format_truncated) = format_pax_legacy_filename(&pax_prefixed_path, tarheader.file_type)?;
+        let (pax_relapath_unix, pax_relapath_extended, _) = format_pax_legacy_filename(&pax_prefixed_path, tarheader.file_type)?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
@@ -354,7 +353,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
 pub fn checksum_header(header: &mut Vec<u8>) {
     ustar::checksum_header(&mut header[0..512]);
     
-    if (header.len() >= 1024) {
+    if header.len() >= 1024 {
         let header_len = header.len();
         ustar::checksum_header(&mut header[header_len - 512..header_len]);
     }
@@ -362,7 +361,7 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use std::{io, path};
+    use std::{path};
     use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename};
     use rapidtar::tar::TarFileType;
     
