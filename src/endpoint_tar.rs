@@ -11,10 +11,11 @@ extern crate winapi;
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store, Collect};
-use std::{io, time};
+use std::{io, time, env, path};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rapidtar::{tar, traverse};
+use rapidtar::{tar, traverse, normalize};
 use rapidtar::fs::open_sink;
+use pathdiff::diff_paths;
 
 use std::io::Write;
 
@@ -61,7 +62,7 @@ fn main() -> io::Result<()> {
             let child_sender = sender.clone();
             
             s.spawn(move |_| {
-                traverse::traverse(traversal_path.clone(), &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                traverse::traverse(traversal_path, &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
                     c.send(tar::headergen(path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                     Ok(())
                 }, child_sender);
@@ -76,9 +77,9 @@ fn main() -> io::Result<()> {
             match tar::serialize(&entry, &mut tarball) {
                 Ok(size) => {
                     tarball_size += size;
-                    eprintln!("{:?}", entry.tar_header.path);
+                    eprintln!("{:?}", entry.original_path);
                 },
-                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.tar_header.path, e)
+                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
             }
         }
         

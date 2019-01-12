@@ -5,6 +5,82 @@ mod pax;
 use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
 use rapidtar::fs::{get_unix_mode, get_file_type};
+use rapidtar::normalize;
+
+/// Given a filesystem path and the file's type, canonicalize the path for tar
+/// archival.
+/// 
+/// If the given filetype indicates a directory, then the path will be suffixed
+/// by a path separator.
+/// 
+/// # Compatibility Note
+/// 
+/// The `canonicalized_tar_path` function was written specifically to match the
+/// quirks of GNU tar, especially it's behavior of transforming Windows paths
+/// into UNIX-looking equivalents. (e.g. C:\test.txt becomes c\test.txt)
+pub fn canonicalized_tar_path(dirpath: &path::Path, filetype: TarFileType) -> String {
+    let mut relapath_encoded : String = String::with_capacity(255);
+    let mut first = true;
+    
+    for component in dirpath.components() {
+        if let path::Component::RootDir = component {
+        } else {
+            if !first {
+                relapath_encoded.push('/');
+            } else {
+                first = false;
+            }
+            
+            match component {
+                path::Component::Prefix(prefix) => {
+                    //TODO: UNC and VerbatimUNC paths won't roundtrip.
+                    match prefix.kind() {
+                        path::Prefix::Verbatim(rootpath) => {
+                            relapath_encoded.extend(rootpath.to_string_lossy().into_owned().chars());
+                        },
+                        path::Prefix::VerbatimUNC(server, share) => {
+                            relapath_encoded.extend(server.to_string_lossy().into_owned().chars());
+                            relapath_encoded.push('/');
+                            relapath_encoded.extend(share.to_string_lossy().into_owned().chars());
+                        },
+                        path::Prefix::VerbatimDisk(letter) => {
+                            relapath_encoded.push((letter as char).to_ascii_lowercase());
+                        },
+                        path::Prefix::DeviceNS(devicename) => {
+                            //ustar+ allows archiving `/dev` on UNIX, but that's because UNIX uses
+                            //specially marked files to bring devices into the UNIX namespace. On
+                            //Windows, `\\.\` paths are a window into the NT object namespace and
+                            //thus make no sense to archive as they are automatically created by
+                            //the kernel. Actually with udev/systemd/etc on Linux this is also
+                            //true there, too.
+                            relapath_encoded.extend(devicename.to_string_lossy().into_owned().chars());
+                        },
+                        path::Prefix::UNC(server, share) => {
+                            relapath_encoded.extend(server.to_string_lossy().into_owned().chars());
+                            relapath_encoded.push('/');
+                            relapath_encoded.extend(share.to_string_lossy().into_owned().chars());
+                        },
+                        path::Prefix::Disk(letter) => {
+                            relapath_encoded.push((letter as char).to_ascii_lowercase());
+                        },
+                    }
+                },
+                path::Component::Normal(name) => {
+                    relapath_encoded.extend(name.to_string_lossy().into_owned().chars());
+                },
+                path::Component::CurDir => relapath_encoded.extend(".".chars()),
+                path::Component::ParentDir => relapath_encoded.extend("..".chars()),
+                _ => {}
+            }
+        }
+    }
+    
+    if let TarFileType::Directory = filetype {
+        relapath_encoded.push('/');
+    }
+    
+    relapath_encoded
+}
 
 /// An abstract representation of the TAR typeflag field.
 /// 
@@ -62,6 +138,8 @@ pub struct TarHeader {
 pub struct HeaderGenResult {
     pub tar_header: TarHeader,
     pub encoded_header: Vec<u8>,
+    pub original_path: Box<path::PathBuf>,
+    pub canonical_path: Box<path::PathBuf>,
     pub file_prefix: Option<Vec<u8>>
 }
 
@@ -75,7 +153,7 @@ pub struct HeaderGenResult {
 /// TODO: Make headergen read-ahead caching maximum configurable.
 pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
     let tarheader = TarHeader {
-        path: Box::new(entry_path.clone().to_path_buf()),
+        path: Box::new(normalize::normalize(&entry_path)),
         unix_mode: get_unix_mode(entry_metadata)?,
         
         //TODO: Get plausible IDs for these.
@@ -99,6 +177,8 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
     let mut concrete_tarheader = pax::pax_header(&tarheader)?;
     pax::checksum_header(&mut concrete_tarheader);
     
+    let canonical_path = fs::canonicalize(entry_path).unwrap();
+    
     let readahead = match tarheader.file_type {
         TarFileType::FileStream => {
             let cache_len = cmp::min(tarheader.file_size, 1*1024*1024);
@@ -116,7 +196,7 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
             //actually read, too.
             let mut final_cache_len = 0;
             
-            match fs::File::open(entry_path) {
+            match fs::File::open(canonical_path.clone()) {
                 Ok(mut file) => {
                     loop {
                         match file.read(&mut filebuf[final_cache_len..]) {
@@ -158,7 +238,11 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
         _ => None
     };
     
-    Ok(HeaderGenResult{tar_header: tarheader, encoded_header: concrete_tarheader, file_prefix: readahead})
+    Ok(HeaderGenResult{tar_header: tarheader,
+        encoded_header: concrete_tarheader,
+        original_path: Box::new(entry_path.to_path_buf()),
+        canonical_path: Box::new(canonical_path),
+        file_prefix: readahead})
 }
 
 /// Given a traversal result, attempt to serialize it's data as tar format data
@@ -172,7 +256,7 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
     tarball.write_all(&traversal.encoded_header)?;
     
     if let TarFileType::FileStream = traversal.tar_header.file_type {
-        let mut source_file = fs::File::open(traversal.tar_header.path.as_ref())?;
+        let mut source_file = fs::File::open(traversal.canonical_path.as_ref())?;
 
         if let Some(ref readahead) = traversal.file_prefix {
             tarball_size += readahead.len() as u64;
@@ -187,7 +271,7 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
 
         if tarball_size != expected_size {
             //TODO: If we error out the write count is wrong. Need an out-of-bound error reporting mechanism.
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.tar_header.path, (expected_size - tarball_size))));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.original_path, (expected_size - tarball_size))));
         }
     }
     

@@ -1,8 +1,7 @@
 use std::{io, path, time, fmt};
 use pad::{PadStr, Alignment};
-use pathdiff::diff_paths;
 use rapidtar::tar::pax;
-use rapidtar::tar::{TarHeader, TarFileType};
+use rapidtar::tar::{TarHeader, TarFileType, canonicalized_tar_path};
 use num;
 use num_traits;
 
@@ -57,7 +56,7 @@ fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 /// If the path cannot be split to fit the tar file naming length requirements
 /// then this function returns an error.
 pub fn format_tar_filename(dirpath: &path::Path, filetype: TarFileType) -> io::Result<(Vec<u8>, Vec<u8>)> {
-    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(dirpath, filetype)?;
+    let (unix, prefix, was_truncated) = pax::format_pax_legacy_filename(&canonicalized_tar_path(dirpath, filetype))?;
     
     if was_truncated {
         return Err(io::Error::new(io::ErrorKind::InvalidData, "File name is too long or contains non-ASCII characters"));
