@@ -58,6 +58,8 @@ fn main() -> io::Result<()> {
         let reciever : Receiver<tar::HeaderGenResult> = reciever;
         let mut tarball = open_sink(outfile, blocking_factor).unwrap();
         
+        env::set_current_dir(basepath).unwrap();
+        
         for traversal_path in traversal_list {
             let child_sender = sender.clone();
             
@@ -74,10 +76,10 @@ fn main() -> io::Result<()> {
         let mut tarball_size = 0;
         
         while let Ok(entry) = reciever.recv() {
+            //eprintln!("{:?}", entry.original_path);
             match tar::serialize(&entry, &mut tarball) {
                 Ok(size) => {
                     tarball_size += size;
-                    eprintln!("{:?}", entry.original_path);
                 },
                 Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
             }
