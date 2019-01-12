@@ -61,22 +61,26 @@ pub fn format_pax_legacy_filename(dirpath: &path::Path, filetype: TarFileType) -
     let mut is_ascii = true;
     
     for component in dirpath.components() {
-        if !first {
-            relapath_encoded.push('/' as u8);
+        if let path::Component::RootDir = component {
+        } else if let path::Component::Prefix(_) = component {
         } else {
-            first = false;
-        }
-        
-        match component {
-            path::Component::Normal(name) => {
-                let utf8ish_name = name.to_string_lossy().into_owned();
-                
-                is_ascii = is_ascii && utf8ish_name.is_ascii();
-                relapath_encoded.extend(utf8ish_name.replace(|c: char| !c.is_ascii(), "").into_bytes());
-            },
-            path::Component::CurDir => relapath_encoded.extend(".".as_bytes()),
-            path::Component::ParentDir => relapath_encoded.extend("..".as_bytes()),
-            _ => {}
+            if !first {
+                relapath_encoded.push('/' as u8);
+            } else {
+                first = false;
+            }
+
+            match component {
+                path::Component::Normal(name) => {
+                    let utf8ish_name = name.to_string_lossy().into_owned();
+
+                    is_ascii = is_ascii && utf8ish_name.is_ascii();
+                    relapath_encoded.extend(utf8ish_name.replace(|c: char| !c.is_ascii(), "").into_bytes());
+                },
+                path::Component::CurDir => relapath_encoded.extend(".".as_bytes()),
+                path::Component::ParentDir => relapath_encoded.extend("..".as_bytes()),
+                _ => {}
+            }
         }
     }
     
