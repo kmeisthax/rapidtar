@@ -104,7 +104,11 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     header.extend(format_tar_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
     header.extend(format_tar_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
     header.extend(format_tar_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
-    header.extend(format_tar_numeral(tarheader.file_size, 12).unwrap_or(vec![0; 12])); //File size
+    if let TarFileType::FileStream = tarheader.file_type {
+        header.extend(format_tar_numeral(tarheader.file_size, 12).unwrap_or(vec![0; 12])); //File size
+    } else {
+        header.extend(format_tar_numeral(0, 12).unwrap_or(vec![0; 12])); //Non-file entries must have a size of 0, or 7zip tries to skip them
+    }
     header.extend(format_tar_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
     header.extend("        ".as_bytes()); //checksummable format checksum value
     header.push(tarheader.file_type.type_flag() as u8); //File type
