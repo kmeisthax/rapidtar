@@ -21,8 +21,13 @@ use std::io::Write;
 
 #[derive(Copy, Clone)]
 enum TarOperation {
+    Join,
     Create,
+    Compare,
     List,
+    Append,
+    Update,
+    Extract
 }
 
 fn main() -> io::Result<()> {
@@ -45,8 +50,13 @@ fn main() -> io::Result<()> {
         //TODO: tar takes traversal paths, not basepaths. Basepath is implicitly
         // ./ until overridden, whereas we treat it as both base path and
         //traversal path.
-        ap.refer(&mut operation).add_option(&["-c"], StoreConst(TarOperation::Create), "Create a new tar archive.")
-            .add_option(&["-t"], StoreConst(TarOperation::List), "List the contents of a tar archive.");
+        ap.refer(&mut operation).add_option(&["-A", "--catenate", "--concatenate"], StoreConst(TarOperation::Join), "Join two tar archives into a single file.")
+            .add_option(&["-c", "--create"], StoreConst(TarOperation::Create), "Create a new tar archive.")
+            .add_option(&["-d", "--diff", "--compare"], StoreConst(TarOperation::Compare), "List differences between a tar archive and the filesystem.")
+            .add_option(&["-t", "--list"], StoreConst(TarOperation::List), "List the contents of a tar archive.")
+            .add_option(&["-r", "--append"], StoreConst(TarOperation::Append), "Add files to the end of an archive.")
+            .add_option(&["-u", "--update"], StoreConst(TarOperation::Update), "Update files within an archive that have changed.")
+            .add_option(&["-x", "--extract", "--get"], StoreConst(TarOperation::Extract), "Extract files from an archive.");
         ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
         ap.refer(&mut basepath).add_option(&["--basepath"], Store, "The base path of the archival operation. Defaults to current working directory.");
@@ -111,8 +121,8 @@ fn main() -> io::Result<()> {
 
             Ok(())
         },
-        TarOperation::List => {
-            //todo...
+        _ => {
+            eprintln!("Not implemented yet.");
             Ok(())
         }
     }
