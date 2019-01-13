@@ -6,20 +6,11 @@ mod windows;
 #[cfg(unix)]
 mod unix;
 
+#[cfg(unix)]
+pub use rapidtar::fs::unix::*;
+
 #[cfg(windows)]
-pub use rapidtar::fs::windows::open_sink;
+pub use rapidtar::fs::windows::*;
 
-#[cfg(not(windows))]
-pub use rapidtar::fs::portable::open_sink;
-
-#[cfg(unix)]
-pub use rapidtar::fs::unix::get_unix_mode;
-
-#[cfg(not(unix))]
-pub use rapidtar::fs::portable::get_unix_mode;
-
-#[cfg(unix)]
-pub use rapidtar::fs::unix::get_file_type;
-
-#[cfg(not(unix))]
-pub use rapidtar::fs::portable::get_file_type;
+#[cfg(all(not(unix), not(windows)))]
+pub use rapidtar::fs::portable::*;

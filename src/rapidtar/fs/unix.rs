@@ -1,6 +1,8 @@
 use std::{io, fs};
 use std::os::unix::prelude::*;
 
+pub use rapidtar::fs::portable::{open_sink};
+
 /// Given a directory entry, produce valid mode bits for it.
 /// 
 /// This is the UNIX version of the function. It pulls the mode bits from the OS

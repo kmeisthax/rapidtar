@@ -2,6 +2,8 @@ use std::{io, fs, ffi, path};
 use rapidtar::tape::windows::WindowsTapeDevice;
 use rapidtar::blocking::BlockingWriter;
 
+pub use rapidtar::fs::portable::{get_unix_mode, get_file_type};
+
 /// Open a sink object for writing an archive (aka "tape").
 /// 
 /// Returned writer can be either an actual tape device or a standard file.
