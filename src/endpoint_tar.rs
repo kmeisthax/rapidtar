@@ -47,9 +47,6 @@ fn main() -> io::Result<()> {
         
         ap.set_description("Create an archive file from a given directory's contents in parallel.");
         
-        //TODO: tar takes traversal paths, not basepaths. Basepath is implicitly
-        // ./ until overridden, whereas we treat it as both base path and
-        //traversal path.
         ap.refer(&mut operation).add_option(&["-A", "--catenate", "--concatenate"], StoreConst(TarOperation::Join), "Join two tar archives into a single file.")
             .add_option(&["-c", "--create"], StoreConst(TarOperation::Create), "Create a new tar archive.")
             .add_option(&["-d", "--diff", "--compare"], StoreConst(TarOperation::Compare), "List differences between a tar archive and the filesystem.")
@@ -59,7 +56,7 @@ fn main() -> io::Result<()> {
             .add_option(&["-x", "--extract", "--get"], StoreConst(TarOperation::Extract), "Extract files from an archive.");
         ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
-        ap.refer(&mut basepath).add_option(&["--basepath"], Store, "The base path of the archival operation. Defaults to current working directory.");
+        ap.refer(&mut basepath).add_option(&["-C", "--directory"], Store, "The base path of the archival operation. Defaults to current working directory.");
         ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
         ap.refer(&mut blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
