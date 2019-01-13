@@ -1,5 +1,15 @@
-use std::{io, fs};
+use std::{io, fs, path, ffi};
 use rapidtar::tar;
+
+/// Open a sink object for writing an archive (aka "tape").
+///
+/// Returned writer can be either an actual tape device or a standard file.
+/// Since this is the portable version, this only opens files.
+pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: usize) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
+    let file = fs::File::create(outfile.as_ref())?;
+
+    Ok(Box::new(file))
+}
 
 /// Given a directory entry, produce valid TAR mode bits for it.
 /// 
