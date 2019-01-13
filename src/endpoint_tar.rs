@@ -10,7 +10,7 @@ extern crate winapi;
 
 mod rapidtar;
 
-use argparse::{ArgumentParser, Store, Collect};
+use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
 use std::{io, time, env, path};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use rapidtar::{tar, traverse, normalize};
@@ -18,6 +18,12 @@ use rapidtar::fs::open_sink;
 use pathdiff::diff_paths;
 
 use std::io::Write;
+
+#[derive(Copy, Clone)]
+enum TarOperation {
+    Create,
+    List,
+}
 
 fn main() -> io::Result<()> {
     //Here's some configuration!
@@ -28,6 +34,8 @@ fn main() -> io::Result<()> {
         //TODO: If CWD is not a valid Unicode string the default basepath makes no sense.
     let mut outfile = "out.tar".to_string();
     let mut traversal_list : Vec<String> = Vec::new();
+    let mut operation = TarOperation::Create;
+    let mut verbose = false;
     
     {
         let mut ap = ArgumentParser::new();
@@ -37,6 +45,9 @@ fn main() -> io::Result<()> {
         //TODO: tar takes traversal paths, not basepaths. Basepath is implicitly
         // ./ until overridden, whereas we treat it as both base path and
         //traversal path.
+        ap.refer(&mut operation).add_option(&["-c"], StoreConst(TarOperation::Create), "Create a new tar archive.")
+            .add_option(&["-t"], StoreConst(TarOperation::List), "List the contents of a tar archive.");
+        ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
         ap.refer(&mut basepath).add_option(&["--basepath"], Store, "The base path of the archival operation. Defaults to current working directory.");
         ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
@@ -47,51 +58,62 @@ fn main() -> io::Result<()> {
         ap.parse_args_or_exit();
     }
     
-    //This is a sync channel, which means that it's channel bound forms a
-    //rudimentary backpressure mechanism. If there are 512 files already queued,
-    //then the 512 threads in the reading pool will eventually block, resulting
-    //in a maximum number of 1024 files - 1MB each - in memory at one time.
-    let (sender, reciever) = sync_channel(channel_queue_depth);
-    
-    rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
-        let start_instant = time::Instant::now();
-        let reciever : Receiver<tar::HeaderGenResult> = reciever;
-        let mut tarball = open_sink(outfile, blocking_factor).unwrap();
-        
-        env::set_current_dir(basepath).unwrap();
-        
-        for traversal_path in traversal_list {
-            let child_sender = sender.clone();
-            
-            s.spawn(move |_| {
-                traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                    c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
-                    Ok(())
-                }, child_sender, None);
-            });
-        }
-        
-        drop(sender); //Kill the original sender, else the whole thread network deadlocks.
-        
-        let mut tarball_size = 0;
-        
-        while let Ok(entry) = reciever.recv() {
-            //eprintln!("{:?}", entry.original_path);
-            match tar::serialize(&entry, &mut tarball) {
-                Ok(size) => {
-                    tarball_size += size;
-                },
-                Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
-            }
-        }
-        
-        tarball.write_all(&vec![0; 1024]).unwrap();
-        tarball.flush().unwrap();
-        
-        let write_time = start_instant.elapsed();
+    match operation {
+        TarOperation::Create => {
+            //This is a sync channel, which means that it's channel bound forms a
+            //rudimentary backpressure mechanism. If there are 512 files already queued,
+            //then the 512 threads in the reading pool will eventually block, resulting
+            //in a maximum number of 1024 files - 1MB each - in memory at one time.
+            let (sender, reciever) = sync_channel(channel_queue_depth);
 
-        eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
-    });
-    
-    Ok(())
+            rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
+                let start_instant = time::Instant::now();
+                let reciever : Receiver<tar::HeaderGenResult> = reciever;
+                let mut tarball = open_sink(outfile, blocking_factor).unwrap();
+
+                env::set_current_dir(basepath).unwrap();
+
+                for traversal_path in traversal_list {
+                    let child_sender = sender.clone();
+
+                    s.spawn(move |_| {
+                        traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                            c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                            Ok(())
+                        }, child_sender, None);
+                    });
+                }
+
+                drop(sender); //Kill the original sender, else the whole thread network deadlocks.
+
+                let mut tarball_size = 0;
+
+                while let Ok(entry) = reciever.recv() {
+                    if verbose {
+                        eprintln!("{:?}", entry.original_path);
+                    }
+
+                    match tar::serialize(&entry, &mut tarball) {
+                        Ok(size) => {
+                            tarball_size += size;
+                        },
+                        Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
+                    }
+                }
+
+                tarball.write_all(&vec![0; 1024]).unwrap();
+                tarball.flush().unwrap();
+
+                let write_time = start_instant.elapsed();
+
+                eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
+            });
+
+            Ok(())
+        },
+        TarOperation::List => {
+            //todo...
+            Ok(())
+        }
+    }
 }
