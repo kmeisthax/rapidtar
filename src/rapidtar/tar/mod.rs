@@ -151,9 +151,9 @@ pub struct HeaderGenResult {
 /// fails or the item is not a file then the file_prefix field will be None.
 /// 
 /// TODO: Make headergen read-ahead caching maximum configurable.
-pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
+pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
     let tarheader = TarHeader {
-        path: Box::new(normalize::normalize(&entry_path)),
+        path: Box::new(normalize::normalize(&archival_path)),
         unix_mode: get_unix_mode(entry_metadata)?,
         
         //TODO: Get plausible IDs for these.
@@ -177,6 +177,7 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
     let mut concrete_tarheader = pax::pax_header(&tarheader)?;
     pax::checksum_header(&mut concrete_tarheader);
     
+    //TODO: This should be unnecessary as we are usually handed data from traverse
     let canonical_path = fs::canonicalize(entry_path).unwrap();
     
     let readahead = match tarheader.file_type {
@@ -240,7 +241,7 @@ pub fn headergen(entry_path: &path::Path, entry_metadata: &fs::Metadata) -> io::
     
     Ok(HeaderGenResult{tar_header: tarheader,
         encoded_header: concrete_tarheader,
-        original_path: Box::new(entry_path.to_path_buf()),
+        original_path: Box::new(archival_path.to_path_buf()),
         canonical_path: Box::new(canonical_path),
         file_prefix: readahead})
 }

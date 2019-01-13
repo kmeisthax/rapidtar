@@ -64,10 +64,10 @@ fn main() -> io::Result<()> {
             let child_sender = sender.clone();
             
             s.spawn(move |_| {
-                traverse::traverse(traversal_path, &move |path, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                    c.send(tar::headergen(path, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                    c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                     Ok(())
-                }, child_sender);
+                }, child_sender, None);
             });
         }
         
