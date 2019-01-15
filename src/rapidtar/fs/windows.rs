@@ -7,15 +7,13 @@ pub use rapidtar::fs::portable::{get_unix_mode, get_file_type};
 
 /// Open a sink object for writing an archive (aka "tape").
 /// 
-/// # Returns
+/// For more information, please see `rapidtar::fs::portable::open_sink`.
 /// 
-/// Returned writer can be either an actual tape device or a standard file.
+/// # Platform considerations
 /// 
-/// Because the properties of magnetic tape and disk/flash are wildly different,
-/// we only provide a subset of APIs that make sense for both. Notably, seeking
-/// on magnetic tape is far more involved than for seeking files on disk, so we
-/// cannot expose a unified `io::Seek` object.
-pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: usize) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
+/// This is the Windows version of the function. It supports writes to files
+/// and tape devices.
+pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
     let mut is_tape = false;
     
     {
@@ -42,7 +40,11 @@ pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: usize) -> io
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
                 Ok(mut tape) => {
-                    return Ok(Box::new(BlockingWriter::new_with_factor(tape, blocking_factor)));
+                    if let Some(blocksize) = blocking_factor {
+                        return Ok(Box::new(BlockingWriter::new_with_factor(tape, blocksize)));
+                    } else {
+                        return Ok(Box::new(tape));
+                    }
                 },
                 Err(e) => {
                     match e.raw_os_error() {
@@ -69,11 +71,12 @@ pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: usize) -> io
     }
 }
 
-/// Open a tape device.
+/// Open an object for total control of a tape device.
+///
+/// # Platform considerations
 /// 
-/// Unlike `open_sink`, the given path *must* refer to a tape device and no
-/// other kind of file or device. Otherwise, object creation may fail, panic, or
-/// return an object whose methods fail or panic.
+/// This is the Windows version of the function. It implements tape control for
+/// all tape devices in the `\\.\TAPEn` namespace.
 pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
     //Windows does this fun thing where it pretends tape devices don't exist
     //sometimes, so we ignore up to 5 file/path not found errors before actually

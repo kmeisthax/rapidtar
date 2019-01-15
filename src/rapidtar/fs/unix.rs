@@ -1,19 +1,30 @@
 use std::{io, fs};
 use std::os::unix::prelude::*;
+use rapidtar::tar;
 
-pub use rapidtar::fs::portable::{open_sink};
+pub use rapidtar::fs::portable::{open_sink, open_tape};
 
-/// Given a directory entry, produce valid mode bits for it.
+/// Given a directory entry, produce valid Unix mode bits for it.
 /// 
-/// This is the UNIX version of the function. It pulls the mode bits from the OS
+/// # Platform considerations
+///
+/// This is the Unix version of the function. It pulls real mode bits off the
+/// filesystem whose semantic meaning is identical to the definition of
+/// `fs::portable::get_unix_mode`.
 pub fn get_unix_mode(metadata: &fs::Metadata) -> io::Result<u32> {
     Ok(metadata.permissions().mode())
 }
 
 /// Given some metadata, produce a valid tar file type for it.
 /// 
-/// This is the portable version of the function. It can fail, say if the
-/// metadata fails to yield a valid type.
+/// # Platform considerations
+///
+/// This is the Unix version of the function. Beyond what is already supported
+/// by the portable version, it also will indicate if the file is a block,
+/// character, or FIFO device.
+///
+/// UNIX domain sockets are not supported by this function and yield an error,
+/// as they have no valid tar representation.
 pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::TarFileType> {
     if metadata.file_type().is_block_device() {
         Ok(tar::TarFileType::BlockDevice)
@@ -22,7 +33,7 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::TarFileType> {
     } else if metadata.file_type().is_fifo() {
         Ok(tar::TarFileType::FIFOPipe)
     } else if metadata.file_type().is_socket() {
-        Ok(tar::TarFileType::Socket)
+        Err(io::Error::new(io::ErrorKind::InvalidData, "Sockets are not archivable"))
     } else if metadata.file_type().is_dir() {
         Ok(tar::TarFileType::Directory)
     } else if metadata.file_type().is_file() {

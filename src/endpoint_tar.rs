@@ -76,7 +76,7 @@ fn main() -> io::Result<()> {
             rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
                 let start_instant = time::Instant::now();
                 let reciever : Receiver<tar::HeaderGenResult> = reciever;
-                let mut tarball = open_sink(outfile, blocking_factor).unwrap();
+                let mut tarball = open_sink(outfile, Some(blocking_factor)).unwrap();
 
                 env::set_current_dir(basepath).unwrap();
 
