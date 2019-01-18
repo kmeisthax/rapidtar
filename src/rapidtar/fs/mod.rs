@@ -1,10 +1,10 @@
-mod portable;
+pub mod portable;
 
 #[cfg(windows)]
-mod windows;
+pub mod windows;
 
 #[cfg(unix)]
-mod unix;
+pub mod unix;
 
 #[cfg(unix)]
 pub use rapidtar::fs::unix::*;
