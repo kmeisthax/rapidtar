@@ -1,28 +1,36 @@
-use std::io;
+use std::{io, mem};
 use std::io::Write;
+
+use rapidtar::spanning::{RecoverableWrite, DataZone};
 
 /// Write implementation that ensures all data written to it is passed along to
 /// it's interior writer in identically-sized buffers of 512 * factor bytes.
-pub struct BlockingWriter<W> {
+pub struct BlockingWriter<W, P> where P: Clone {
     blocking_factor: usize,
     inner: W,
-    block: Vec<u8>
+    block: Vec<u8>,
+    current_data_zone: Option<DataZone<P>>,
+    uncommitted_data_zones: Vec<DataZone<P>>
 }
 
-impl<W: Write> BlockingWriter<W> {
-    pub fn new(inner: W) -> BlockingWriter<W> {
+impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
+    pub fn new(inner: W) -> BlockingWriter<W, P> {
         BlockingWriter {
             inner: inner,
             blocking_factor: 20 * 512,
-            block: Vec::with_capacity(20 * 512)
+            block: Vec::with_capacity(20 * 512),
+            current_data_zone: None,
+            uncommitted_data_zones: Vec::new()
         }
     }
     
-    pub fn new_with_factor(inner: W, factor: usize) -> BlockingWriter<W> {
+    pub fn new_with_factor(inner: W, factor: usize) -> BlockingWriter<W, P> {
         BlockingWriter {
             inner: inner,
             blocking_factor: factor * 512,
-            block: Vec::with_capacity(factor * 512)
+            block: Vec::with_capacity(factor * 512),
+            current_data_zone: None,
+            uncommitted_data_zones: Vec::new()
         }
     }
     
@@ -73,7 +81,35 @@ impl<W: Write> BlockingWriter<W> {
     }
 }
 
-impl<W:Write> Write for BlockingWriter<W> {
+impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone, W: RecoverableWrite<P> {
+    fn begin_data_zone(&mut self, ident: P) {
+        self.end_data_zone();
+
+        self.current_data_zone = Some(DataZone::new(ident.clone()));
+
+        self.inner.begin_data_zone(ident);
+    }
+
+    fn end_data_zone(&mut self) {
+        if let Some(ref zone) = self.current_data_zone {
+            self.uncommitted_data_zones.push(zone.clone());
+        }
+
+        self.current_data_zone = None;
+
+        self.inner.end_data_zone();
+    }
+
+    fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
+        let mut inner_ucw = self.inner.uncommitted_writes();
+
+        inner_ucw.append(&mut self.uncommitted_data_zones.clone());
+
+        inner_ucw
+    }
+}
+
+impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         //Precondition: Ensure the write buffer isn't full.
         self.empty_block()?;

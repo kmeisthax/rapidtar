@@ -4,3 +4,4 @@ pub mod blocking;
 pub mod tape;
 pub mod fs;
 pub mod normalize;
+pub mod spanning;
