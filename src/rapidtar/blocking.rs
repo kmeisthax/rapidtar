@@ -51,9 +51,18 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
         
         if block_space >= buf.len() {
             self.block.extend(buf);
+
+            if let Some(ref mut zone) = self.current_data_zone {
+                zone.write_buffered(buf.len() as u64);
+            }
+
             return None;
         }
         
+        if let Some(ref mut zone) = self.current_data_zone {
+            zone.write_buffered(block_space as u64);
+        }
+
         self.block.extend(&buf[0..block_space]);
         Some(&buf[block_space..])
     }
@@ -71,6 +80,20 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
         if self.block.len() >= self.blocking_factor {
             self.inner.write_all(&self.block)?;
             
+            let mut commit_length = self.block.len() as u64;
+            let mut first_uncommitted = 0;
+
+            for zone in &mut self.uncommitted_data_zones {
+                if let Some(overhang) = zone.write_committed(commit_length) {
+                    commit_length = overhang;
+                    first_uncommitted += 1;
+                } else {
+                    break;
+                }
+            }
+
+            self.uncommitted_data_zones.split_off(first_uncommitted);
+
             //This is actually safe, because this always acts to shrink
             //the array, failing to drop values properly is safe (though
             //bad practice), and u8 doesn't implement Drop anyway.
@@ -126,7 +149,13 @@ impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone {
         if self.block.len() == 0 && buf.len() >= self.blocking_factor {
             while shortcircuit_writes <= (buf.len() - self.blocking_factor) {
                 match self.inner.write(&buf[shortcircuit_writes..(shortcircuit_writes + self.blocking_factor)]) {
-                    Ok(blk_write) => shortcircuit_writes += blk_write,
+                    Ok(blk_write) => {
+                        shortcircuit_writes += blk_write;
+
+                        if let Some(ref mut zone) = self.current_data_zone {
+                            zone.write_through(blk_write as u64);
+                        }
+                    }
                     Err(x) => return Err(x)
                 }
             }

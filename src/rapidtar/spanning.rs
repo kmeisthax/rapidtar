@@ -23,6 +23,47 @@ impl<P> DataZone<P> {
             uncommitted_length: 0
         }
     }
+
+    /// Mark a number of bytes which were successfully written through without
+    /// buffering.
+    pub fn write_through(&mut self, length: u64) {
+        self.length += length;
+        self.committed_length += length;
+    }
+
+    /// Mark a number of bytes which were buffered but have not yet been
+    /// committed to the target device and may still fail.
+    pub fn write_buffered(&mut self, length: u64) {
+        self.length += length;
+        self.uncommitted_length += length;
+    }
+
+    /// Mark a number of buffered bytes which have been copied from the
+    /// writer's internal buffer and committed to the destination device.
+    ///
+    /// # Returns
+    ///
+    /// If uncommitted data still remains within this zone, returns None.
+    ///
+    /// Otherwise, if the zone has been completely committed, this function
+    /// returns the number of bytes outside the zone that has been committed.
+    /// If the commitment range exactly matches the length of the zone, then
+    /// this function returns zero.
+    pub fn write_committed(&mut self, length: u64) -> Option<u64> {
+        if (self.uncommitted_length < length) {
+            self.uncommitted_length -= length;
+            self.committed_length += length;
+
+            return None;
+        }
+
+        let overhang = length - self.uncommitted_length;
+
+        self.uncommitted_length = 0;
+        self.committed_length += overhang;
+
+        Some(overhang)
+    }
 }
 
 /// Represents a write target whose writes are buffered, may fail, and can be
