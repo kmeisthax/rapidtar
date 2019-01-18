@@ -1,9 +1,14 @@
+/// Cross-platform implementations of fs methods that don't do anything
+/// special. Fallback intended for use when a platform does not provide
+/// enhanced functionality.
 pub mod portable;
 
 #[cfg(windows)]
+/// Windows-specific implementations of fs methods.
 pub mod windows;
 
 #[cfg(unix)]
+/// Unix-specific implementations of fs methods.
 pub mod unix;
 
 #[cfg(unix)]

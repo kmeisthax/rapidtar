@@ -1,5 +1,10 @@
+/// Support for GNU extensions to the tar header format.
 mod gnu;
+
+/// Support for basic standard tar headers, aka UNIX Standard Tar format.
 mod ustar;
+
+/// Support for Portable Archive eXchange tar headers.
 mod pax;
 
 use std::{io, path, fs, time, cmp};
@@ -101,6 +106,10 @@ pub enum TarFileType {
 }
 
 impl TarFileType {
+    /// Serialize a file type into a given type character flag.
+    ///
+    /// The set of file types are taken from the USTar format and represent all
+    /// standard types. Nonstandard types can be represented as `Other`.
     pub fn type_flag(&self) -> char {
         match self {
             TarFileType::FileStream => '0',
@@ -135,11 +144,28 @@ pub struct TarHeader {
     pub birthtime: Option<time::SystemTime>,
 }
 
+/// A serialized tar header, ready for serialization into an archive.
+///
+/// # File caching
+///
+/// A HeaderGen
 pub struct HeaderGenResult {
+    /// The abstract tar header which was used to produce the encoded header.
     pub tar_header: TarHeader,
+
+    /// The encoded tar header, suitable for direct copy into an archive file.
     pub encoded_header: Vec<u8>,
+
+    /// The path of the file as would have been entered by the user, suitable
+    /// for display in error messages and the like.
     pub original_path: Box<path::PathBuf>,
+
+    /// A valid, canonicalized path which can be used to open and read data
+    /// for archival.
     pub canonical_path: Box<path::PathBuf>,
+
+    /// Optional cached file stream data. If populated, serialization should
+    /// utilize this data while awaiting further data to copy to archive.
     pub file_prefix: Option<Vec<u8>>
 }
 
