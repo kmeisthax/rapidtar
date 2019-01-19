@@ -103,3 +103,49 @@ pub trait RecoverableWrite<P> : io::Write {
     /// type's list of uncommitted writes.
     fn uncommitted_writes(&self) -> Vec<DataZone<P>>;
 }
+
+/// Wraps a writer that does not buffer writes in a `RecoverableWrite`
+/// implementation.
+///
+/// This type exists so that you can use wrappers that implement
+/// `RecoverableWrite` in a pipeline and maintain the benefits of the trait.
+///
+/// (Wrappers cannot provide `RecoverableWrite` for non-`RecoverableWrite`
+/// sinks, at least until there are massive Rust syntax changes which allow
+/// multiple implementations of the same trait based on different guard
+/// statements...)
+pub struct UnbufferedWriter<W: io::Write> {
+    inner: W
+}
+
+impl<W: io::Write> UnbufferedWriter<W> {
+    fn wrap(inner: W) -> UnbufferedWriter<W> {
+        UnbufferedWriter {
+            inner: inner
+        }
+    }
+}
+
+impl <W: io::Write> io::Write for UnbufferedWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl <W: io::Write, P> RecoverableWrite<P> for UnbufferedWriter<W> {
+    fn begin_data_zone(&mut self, ident: P) {
+
+    }
+
+    fn end_data_zone(&mut self) {
+
+    }
+
+    fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
+        Vec::new()
+    }
+}
