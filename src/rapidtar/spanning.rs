@@ -1,17 +1,17 @@
-use std::io;
+use std::{io, fs};
 
 /// Represents data which has been committed to a write buffer and may fail to
 /// be written to the device.
 #[derive(Clone)]
 pub struct DataZone<P> {
-    ident: P,
+    pub ident: P,
     /// The total count of bytes written within this zone. Must equal the sum
     /// of `committed_length` and `uncommitted_length`
-    length: u64,
+    pub length: u64,
     /// The number of those bytes which have been committed to the device.
-    committed_length: u64,
+    pub committed_length: u64,
     /// The remaining bytes not committed to the device.
-    uncommitted_length: u64,
+    pub uncommitted_length: u64,
 }
 
 impl<P> DataZone<P> {
@@ -50,7 +50,7 @@ impl<P> DataZone<P> {
     /// If the commitment range exactly matches the length of the zone, then
     /// this function returns zero.
     pub fn write_committed(&mut self, length: u64) -> Option<u64> {
-        if (self.uncommitted_length < length) {
+        if (self.uncommitted_length > length) {
             self.uncommitted_length -= length;
             self.committed_length += length;
 
@@ -77,14 +77,18 @@ pub trait RecoverableWrite<P> : io::Write {
     ///
     /// A data zone represents a range of bytes in the written stream which can
     /// be attributed to a single source, such as a file being archived.
-    fn begin_data_zone(&mut self, ident: P);
+    fn begin_data_zone(&mut self, ident: P) {
+
+    }
 
     /// End the current data zone.
     ///
     /// All bytes written outside of a data zone do not get tracked in the
     /// report of uncommitted writes (see `uncommitted_writes`). Effectively
     /// they are treated as if they had been committed immediately.
-    fn end_data_zone(&mut self);
+    fn end_data_zone(&mut self) {
+
+    }
 
     /// Inspect all data currently buffered within the current writer which has
     /// not yet been committed to a device.
@@ -101,7 +105,15 @@ pub trait RecoverableWrite<P> : io::Write {
     /// both `io::Write` and `RecoverableWrite` must also forward and merge any
     /// uncommitted writes from the sink back into the buffer or transforming
     /// type's list of uncommitted writes.
-    fn uncommitted_writes(&self) -> Vec<DataZone<P>>;
+    fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
+        Vec::new()
+    }
+}
+
+impl <T, P> RecoverableWrite<P> for io::Cursor<T> where io::Cursor<T> : io::Write {
+}
+
+impl <P> RecoverableWrite<P> for fs::File {
 }
 
 /// Wraps a writer that does not buffer writes in a `RecoverableWrite`
@@ -109,6 +121,9 @@ pub trait RecoverableWrite<P> : io::Write {
 ///
 /// This type exists so that you can use wrappers that implement
 /// `RecoverableWrite` in a pipeline and maintain the benefits of the trait.
+///
+/// Please note that a handful of built-in `std::io` structures already have
+/// the same null `RecoverableWrite` implementation and do not need this shim.
 ///
 /// (Wrappers cannot provide `RecoverableWrite` for non-`RecoverableWrite`
 /// sinks, at least until there are massive Rust syntax changes which allow
@@ -119,10 +134,14 @@ pub struct UnbufferedWriter<W: io::Write> {
 }
 
 impl<W: io::Write> UnbufferedWriter<W> {
-    fn wrap(inner: W) -> UnbufferedWriter<W> {
+    pub fn wrap(inner: W) -> UnbufferedWriter<W> {
         UnbufferedWriter {
             inner: inner
         }
+    }
+
+    pub fn as_inner_writer<'a>(&'a self) -> &'a W {
+        &self.inner
     }
 }
 
@@ -137,15 +156,4 @@ impl <W: io::Write> io::Write for UnbufferedWriter<W> {
 }
 
 impl <W: io::Write, P> RecoverableWrite<P> for UnbufferedWriter<W> {
-    fn begin_data_zone(&mut self, ident: P) {
-
-    }
-
-    fn end_data_zone(&mut self) {
-
-    }
-
-    fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
-        Vec::new()
-    }
 }
