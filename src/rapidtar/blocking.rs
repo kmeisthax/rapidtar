@@ -5,7 +5,7 @@ use rapidtar::spanning::{RecoverableWrite, DataZone};
 
 /// Write implementation that ensures all data written to it is passed along to
 /// it's interior writer in identically-sized buffers of 512 * factor bytes.
-pub struct BlockingWriter<W, P> where P: Clone {
+pub struct BlockingWriter<W, P = u64> where P: Clone {
     blocking_factor: usize,
     inner: W,
     block: Vec<u8>,
@@ -92,7 +92,7 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
                 }
             }
 
-            self.uncommitted_data_zones.split_off(first_uncommitted);
+            self.uncommitted_data_zones = self.uncommitted_data_zones.split_off(first_uncommitted);
 
             //This is actually safe, because this always acts to shrink
             //the array, failing to drop values properly is safe (though
@@ -128,11 +128,15 @@ impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone, W:
 
         inner_ucw.append(&mut self.uncommitted_data_zones.clone());
 
+        if let Some(ref zone) = self.current_data_zone {
+            inner_ucw.push(zone.clone());
+        }
+
         inner_ucw
     }
 }
 
-impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone {
+impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone, W: RecoverableWrite<P> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         //Precondition: Ensure the write buffer isn't full.
         self.empty_block()?;
@@ -184,6 +188,8 @@ impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone {
     /// lost if the client failed to write a correctly divisible number of bytes
     /// instead.
     fn flush(&mut self) -> io::Result<()> {
+        self.end_data_zone();
+
         if self.block.len() < self.blocking_factor {
             self.block.resize(self.blocking_factor, 0);
         }
@@ -199,10 +205,11 @@ impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone {
 mod tests {
     use std::io::{Write, Cursor};
     use rapidtar::blocking::BlockingWriter;
+    use rapidtar::spanning::{UnbufferedWriter, RecoverableWrite};
     
     #[test]
     fn blocking_factor_1_block_passthrough() {
-        let mut blk = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
+        let mut blk : BlockingWriter<_, u64> = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
         
         blk.write_all(&vec![0; 512]).unwrap();
         blk.write_all(&vec![1; 512]).unwrap();
@@ -214,7 +221,7 @@ mod tests {
     
     #[test]
     fn blocking_factor_1_record_splitting() {
-        let mut blk = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
+        let mut blk : BlockingWriter<_, u64> = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
         
         blk.write_all(&vec![0; 384]).unwrap();
         blk.write_all(&vec![1; 384]).unwrap();
@@ -235,7 +242,7 @@ mod tests {
     
     #[test]
     fn blocking_factor_1_record_splitting_shortcircuit() {
-        let mut blk = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
+        let mut blk : BlockingWriter<_, u64> = BlockingWriter::new_with_factor(Cursor::new(vec![]), 1); //1 tar record, or 512 bytes
         
         blk.write_all(&vec![0; 384]).unwrap();
         blk.write_all(&vec![1; 1024]).unwrap();
@@ -252,5 +259,40 @@ mod tests {
         assert_eq!(&blk.as_inner_writer().get_ref()[384..1408], vec![1; 1024].as_slice());
         assert_eq!(&blk.as_inner_writer().get_ref()[1408..3456], vec![2; 2048].as_slice());
         assert_eq!(&blk.as_inner_writer().get_ref()[3456..], vec![0; 128].as_slice());
+    }
+
+    #[test]
+    fn blocking_factor_4_block_zone_tracking() {
+        let mut blk = BlockingWriter::new_with_factor(UnbufferedWriter::wrap(Cursor::new(vec![])), 4);
+        let ident1 = "ident1";
+        let ident2 = "ident2";
+
+        blk.begin_data_zone(ident1);
+        blk.write_all(&vec![0; 512]).unwrap();
+        blk.begin_data_zone(ident2);
+        blk.write_all(&vec![1; 512]).unwrap();
+
+        let zones = blk.uncommitted_writes();
+
+        assert_eq!(zones.len(), 2);
+        assert_eq!(zones[0].ident, ident1);
+        assert_eq!(zones[0].length, 512);
+        assert_eq!(zones[0].uncommitted_length, 512);
+        assert_eq!(zones[0].committed_length, 0);
+        assert_eq!(zones[1].ident, ident2);
+        assert_eq!(zones[1].length, 512);
+        assert_eq!(zones[1].uncommitted_length, 512);
+        assert_eq!(zones[1].committed_length, 0);
+
+        blk.flush();
+
+        let zones_2 = blk.uncommitted_writes();
+
+        assert_eq!(zones_2.len(), 0);
+
+        assert_eq!(blk.as_inner_writer().as_inner_writer().get_ref().len(), 2048);
+        assert_eq!(&blk.as_inner_writer().as_inner_writer().get_ref()[0..512], vec![0 as u8; 512].as_slice());
+        assert_eq!(&blk.as_inner_writer().as_inner_writer().get_ref()[512..1024], vec![1 as u8; 512].as_slice());
+        assert_eq!(&blk.as_inner_writer().as_inner_writer().get_ref()[1024..], vec![0 as u8; 1024].as_slice());
     }
 }
