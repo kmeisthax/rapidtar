@@ -21,3 +21,6 @@ pub mod spanning;
 
 /// Basic result types for functions which can partially succeed.
 pub mod result;
+
+/// Utilities for efficient I/O copies.
+pub mod stream;
