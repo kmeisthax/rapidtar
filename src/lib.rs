@@ -8,6 +8,6 @@ extern crate num_traits;
 #[cfg(windows)]
 extern crate winapi;
 
-pub mod rapidtar;
+mod rapidtar;
 
 pub use rapidtar::*;
