@@ -50,7 +50,7 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
                     Err(e) => return Partial(read_buf.len() - len, e),
                 };
 
-                assert!((read_buf.capacity() - read_buf.len()) <= read_result);
+                assert!((cur_len + read_result) <= read_buf.capacity());
 
                 //This is sound, because:
                 // 1. We pre-initialized all our vectors. No UB can leak.
@@ -67,19 +67,21 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
                 //Now that we've restored consensus reality for safe Rust, we
                 //can handle EOF
                 if read_result == 0 {
-                    break
+                    break;
                 }
             }
 
             Complete(read_buf.len() - len)
         }, || {
             if write_buf.len() > 0 {
-                match w.write(write_buf.as_mut_slice()) {
-                    Ok(0) => return Failure(io::Error::new(io::ErrorKind::WriteZero, "failed to write whole buffer")),
-                    Ok(n) => return Complete(n),
-                    Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
-                    Err(e) => return Failure(e),
-                }
+                let result : PartialResult<usize, io::Error> = match w.write(write_buf.as_mut_slice()) {
+                    Ok(0) => Failure(io::Error::new(io::ErrorKind::WriteZero, "failed to write whole buffer")),
+                    Ok(n) => Complete(n),
+                    Err(ref e) if e.kind() == io::ErrorKind::Interrupted => Complete(0),
+                    Err(e) => Failure(e),
+                };
+
+                return result;
             }
 
             Complete(0)
@@ -119,9 +121,37 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
         }
 
         if write_buf.len() == 0 {
-            break
+            break;
         }
     }
 
     Complete(written)
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate rand;
+
+    use std::io;
+    use rapidtar::stream::tests::rand::Rng;
+    use rapidtar::stream::stream;
+
+    #[test]
+    fn stream_data() {
+        let mut data = vec![0; 1024];
+        let mut rng = rand::thread_rng();
+
+        for d in data.iter_mut() {
+            *d = rng.gen();
+        }
+
+        let mut source = io::Cursor::new(data.clone());
+        let mut sink = io::Cursor::new(vec![]);
+
+        let result = stream(&mut source, &mut sink, None);
+
+        assert_eq!(result.complete().unwrap(), data.len() as u64);
+        assert_eq!(sink.get_ref().len(), data.len());
+        assert_eq!(sink.get_ref(), &data);
+    }
 }

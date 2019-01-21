@@ -11,6 +11,9 @@ argparse = "0.2.2"
 num = "0.2.0"
 num-traits = "0.2.6"
 
+[dev-dependencies]
+rand = "0.6.4"
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
 
