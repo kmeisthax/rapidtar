@@ -95,7 +95,8 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
                 if w_count == write_buf.len() {
                     unsafe { write_buf.set_len(0) };
                 } else {
-                    write_buf = write_buf.split_off(w_count);
+                    let _ : Vec<u8> = write_buf.drain(..w_count).collect();
+                    assert_eq!(write_buf.capacity(), buffer_len.unwrap_or(DEFAULT_BUF_SIZE));
                 }
             },
             Partial(w_count, e) => return Partial(written + w_count as u64, e),
@@ -117,8 +118,12 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
         }
 
         if read_buf.len() > 0 {
-            write_buf.extend_from_slice(read_buf.as_slice());
-            unsafe { read_buf.set_len(0) };
+            let write_slack_space = write_buf.capacity() - write_buf.len();
+            let leave_count = cmp::min(read_buf.len(), write_slack_space);
+            let remain_count = read_buf.len() - leave_count;
+            
+            write_buf.extend_from_slice(&read_buf[..leave_count]);
+            let _ : Vec<u8> = read_buf.drain(..leave_count).collect();
         }
 
         if write_buf.len() == 0 {
@@ -134,8 +139,11 @@ mod tests {
     extern crate rand;
 
     use std::io;
+    use std::io::Write;
     use rapidtar::stream::tests::rand::Rng;
     use rapidtar::stream::stream;
+    use rapidtar::blocking::BlockingWriter;
+    use rapidtar::spanning::RecoverableWrite;
 
     #[test]
     fn stream_data_small() {
@@ -187,10 +195,38 @@ mod tests {
         let mut source = io::Cursor::new(data.clone());
         let mut sink = io::Cursor::new(vec![]);
 
-        let result = stream(&mut source, &mut sink, Some(1024 * 1024 * 10));
+        let result = stream(&mut source, &mut sink, Some(1024 * 30));
 
         assert_eq!(result.complete().unwrap(), data.len() as u64);
         assert_eq!(sink.get_ref().len(), data.len());
         assert_eq!(sink.get_ref(), &data);
+    }
+
+    #[test]
+    fn stream_data_large_with_blockingwriter() {
+        let hdr = vec![6; 512];
+        let mut data = vec![0; 1024 * 1024];
+        let mut pad = vec![0; 5632];
+        let mut rng = rand::thread_rng();
+
+        for d in data.iter_mut() {
+            *d = rng.gen();
+        }
+
+        let mut source = io::Cursor::new(data.clone());
+        let mut sink = BlockingWriter::new_with_factor(io::Cursor::new(vec![]), 20);
+        
+        sink.begin_data_zone(0); //needed for inference.
+        sink.write(&hdr);
+        
+        let result = stream(&mut source, &mut &mut sink, Some(10240));
+        
+        sink.flush();
+        
+        assert_eq!(result.complete().unwrap(), data.len() as u64);
+        assert_eq!(sink.as_inner_writer().get_ref().len(), ((data.len() as f64 + 512 as f64) / 10240 as f64).ceil() as usize * 10240);
+        assert_eq!(&sink.as_inner_writer().get_ref()[..512], &hdr[..]);
+        assert_eq!(&sink.as_inner_writer().get_ref()[512+(1024*1024)..], &pad[..]);
+        assert_eq!(&sink.as_inner_writer().get_ref()[512..512+(1024*1024)], &data[..]);
     }
 }
