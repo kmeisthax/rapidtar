@@ -118,6 +118,7 @@ pub fn stream<R: ?Sized, W: ?Sized>(r: &mut R, w: &mut W, buffer_len: Option<usi
 
         if read_buf.len() > 0 {
             write_buf.extend_from_slice(read_buf.as_slice());
+            unsafe { read_buf.set_len(0) };
         }
 
         if write_buf.len() == 0 {
