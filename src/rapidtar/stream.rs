@@ -138,7 +138,7 @@ mod tests {
     use rapidtar::stream::stream;
 
     #[test]
-    fn stream_data() {
+    fn stream_data_small() {
         let mut data = vec![0; 1024];
         let mut rng = rand::thread_rng();
 
@@ -149,7 +149,45 @@ mod tests {
         let mut source = io::Cursor::new(data.clone());
         let mut sink = io::Cursor::new(vec![]);
 
+        let result = stream(&mut source, &mut sink, Some(128));
+
+        assert_eq!(result.complete().unwrap(), data.len() as u64);
+        assert_eq!(sink.get_ref().len(), data.len());
+        assert_eq!(sink.get_ref(), &data);
+    }
+
+    #[test]
+    fn stream_data_medium() {
+        let mut data = vec![0; 10240];
+        let mut rng = rand::thread_rng();
+
+        for d in data.iter_mut() {
+            *d = rng.gen();
+        }
+
+        let mut source = io::Cursor::new(data.clone());
+        let mut sink = io::Cursor::new(vec![]);
+
         let result = stream(&mut source, &mut sink, None);
+
+        assert_eq!(result.complete().unwrap(), data.len() as u64);
+        assert_eq!(sink.get_ref().len(), data.len());
+        assert_eq!(sink.get_ref(), &data);
+    }
+
+    #[test]
+    fn stream_data_large() {
+        let mut data = vec![0; 1024 * 1024];
+        let mut rng = rand::thread_rng();
+
+        for d in data.iter_mut() {
+            *d = rng.gen();
+        }
+
+        let mut source = io::Cursor::new(data.clone());
+        let mut sink = io::Cursor::new(vec![]);
+
+        let result = stream(&mut source, &mut sink, Some(1024 * 1024 * 10));
 
         assert_eq!(result.complete().unwrap(), data.len() as u64);
         assert_eq!(sink.get_ref().len(), data.len());
