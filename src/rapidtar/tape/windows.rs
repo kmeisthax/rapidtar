@@ -9,6 +9,7 @@ use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
 use rapidtar::tape::TapeDevice;
+use rapidtar::spanning::RecoverableWrite;
 
 pub struct WindowsTapeDevice {
     tape_device: HANDLE
@@ -61,6 +62,9 @@ impl io::Write for WindowsTapeDevice {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+impl RecoverableWrite<u64> for WindowsTapeDevice {
 }
 
 impl TapeDevice for WindowsTapeDevice {
