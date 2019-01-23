@@ -293,7 +293,7 @@ pub fn serialize<I>(traversal: &HeaderGenResult, tarball: &mut ArchivalSink<I>) 
             source_file.seek(io::SeekFrom::Current(readahead.len() as i64))?;
         }
 
-        tarball_size += stream(&mut source_file, tarball, None).complete()?;
+        tarball_size += io::copy(&mut source_file, tarball)?;
 
         let expected_size = traversal.encoded_header.len() as u64 + traversal.tar_header.file_size;
 
