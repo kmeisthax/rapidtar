@@ -209,7 +209,7 @@ pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_meta
     
     let readahead = match tarheader.file_type {
         TarFileType::FileStream => {
-            let cache_len = cmp::min(tarheader.file_size, 1*1024*1024);
+            let cache_len = cmp::min(tarheader.file_size, 64*1024);
             let mut filebuf = Vec::with_capacity(cache_len as usize);
 
             //TODO: Can we soundly replace the following code with using unsafe{} to
@@ -284,19 +284,29 @@ pub fn serialize<I>(traversal: &HeaderGenResult, tarball: &mut ArchivalSink<I>) 
     tarball.write_all(&traversal.encoded_header)?;
     
     if let TarFileType::FileStream = traversal.tar_header.file_type {
-        let mut source_file = fs::File::open(traversal.canonical_path.as_ref())?;
-
+        let mut stream_needed = true;
+        let mut stream_start = 0;
+        
         if let Some(ref readahead) = traversal.file_prefix {
             tarball_size += readahead.len() as u64;
             tarball.write_all(&readahead)?;
-
-            source_file.seek(io::SeekFrom::Current(readahead.len() as i64))?;
+            stream_start = readahead.len() as u64;
+            
+            if readahead.len() as u64 >= traversal.tar_header.file_size {
+                stream_needed = false;
+            }
         }
-
-        tarball_size += io::copy(&mut source_file, tarball)?;
-
+        
+        if stream_needed {
+            let mut source_file = fs::File::open(traversal.canonical_path.as_ref())?;
+            
+            source_file.seek(io::SeekFrom::Start(stream_start))?;
+            
+            tarball_size += io::copy(&mut source_file, tarball)?;
+        }
+        
         let expected_size = traversal.encoded_header.len() as u64 + traversal.tar_header.file_size;
-
+        
         if tarball_size != expected_size {
             //TODO: If we error out the write count is wrong. Need an out-of-bound error reporting mechanism.
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("File {:?} was shorter than indicated in traversal by {} bytes, archive may be damaged.", traversal.original_path, (expected_size - tarball_size))));
