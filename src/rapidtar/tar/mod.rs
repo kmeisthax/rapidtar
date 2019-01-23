@@ -9,8 +9,9 @@ mod pax;
 
 use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
-use rapidtar::fs::{get_unix_mode, get_file_type};
+use rapidtar::fs::{ArchivalSink, get_unix_mode, get_file_type};
 use rapidtar::normalize;
+use rapidtar::stream::stream;
 
 /// Given a filesystem path and the file's type, canonicalize the path for tar
 /// archival.
@@ -276,7 +277,7 @@ pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_meta
 /// in the given tarball writer.
 /// 
 /// Returns the number of bytes written to the file/tape.
-pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Result<u64> {
+pub fn serialize<I>(traversal: &HeaderGenResult, tarball: &mut ArchivalSink<I>) -> io::Result<u64> {
     let mut tarball_size : u64 = 0;
     
     tarball_size += traversal.encoded_header.len() as u64;
@@ -292,7 +293,7 @@ pub fn serialize(traversal: &HeaderGenResult, tarball: &mut io::Write) -> io::Re
             source_file.seek(io::SeekFrom::Current(readahead.len() as i64))?;
         }
 
-        tarball_size += io::copy(&mut source_file, tarball)?;
+        tarball_size += stream(&mut source_file, tarball, None).complete()?;
 
         let expected_size = traversal.encoded_header.len() as u64 + traversal.tar_header.file_size;
 

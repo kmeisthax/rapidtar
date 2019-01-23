@@ -3,7 +3,7 @@ use rapidtar::tape;
 use rapidtar::tape::windows::WindowsTapeDevice;
 use rapidtar::blocking::BlockingWriter;
 
-pub use rapidtar::fs::portable::{get_unix_mode, get_file_type};
+pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 
 /// Open a sink object for writing an archive (aka "tape").
 /// 
@@ -13,7 +13,7 @@ pub use rapidtar::fs::portable::{get_unix_mode, get_file_type};
 /// 
 /// This is the Windows version of the function. It supports writes to files
 /// and tape devices.
-pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<u64>>> where ffi::OsString: From<P>, P: Clone {
     let mut is_tape = false;
     
     {
@@ -84,7 +84,7 @@ pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeD
     let mut notfound_count = 0;
     
     loop {
-        match WindowsTapeDevice::open_device(&ffi::OsString::from(tapedev.clone())) {
+        match WindowsTapeDevice::<u64>::open_device(&ffi::OsString::from(tapedev.clone())) {
             Ok(mut tape) => {
                 return Ok(Box::new(tape));
             }

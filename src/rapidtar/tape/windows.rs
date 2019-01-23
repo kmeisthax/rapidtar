@@ -10,20 +10,28 @@ use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
 use rapidtar::tape::TapeDevice;
 use rapidtar::spanning::RecoverableWrite;
+use rapidtar::fs::ArchivalSink;
 
-pub struct WindowsTapeDevice {
-    tape_device: HANDLE
+pub struct WindowsTapeDevice<P = u64> where P: Sized {
+    tape_device: HANDLE,
+    last_ident: Option<P>
 }
 
-impl WindowsTapeDevice {
+/// Absolutely not safe in the general case, but Windows handles are definitely
+/// Sendable. This is an oversight of the winapi developers, probably.
+unsafe impl<P> Send for WindowsTapeDevice<P> where P: Clone {
+    
+}
+
+impl<P> WindowsTapeDevice<P> where P: Clone {
     /// Open a tape device by it's number.
-    pub fn open_tape_number<I: num::Integer>(nt_tape_id: I) -> io::Result<WindowsTapeDevice> where I: fmt::Display {
+    pub fn open_tape_number<I: num::Integer>(nt_tape_id: I) -> io::Result<WindowsTapeDevice<P>> where I: fmt::Display {
         let filepath = format!("\\\\.\\TAPE{}", nt_tape_id);
         WindowsTapeDevice::open_device(&ffi::OsString::from(filepath))
     }
     
     /// Open a tape device by it's NT device path.
-    pub fn open_device(nt_device_path : &ffi::OsStr) -> io::Result<WindowsTapeDevice> {
+    pub fn open_device(nt_device_path : &ffi::OsStr) -> io::Result<WindowsTapeDevice<P>> {
         let nt_device_path_ffi : Vec<WCHAR> = nt_device_path.encode_wide().collect();
         let nt_device = unsafe { fileapi::CreateFileW(nt_device_path_ffi.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut()) };
         
@@ -41,14 +49,15 @@ impl WindowsTapeDevice {
     /// This is an unsafe function. The nt_device handle must be a valid NT
     /// kernel handle that points to an open tape device. If that is not the
     /// case, then I cannot vouch for the continued health of your Rust program.
-    pub unsafe fn from_device_handle(nt_device : HANDLE) -> WindowsTapeDevice {
+    pub unsafe fn from_device_handle(nt_device : HANDLE) -> WindowsTapeDevice<P> {
         WindowsTapeDevice {
-            tape_device: nt_device
+            tape_device: nt_device,
+            last_ident: None
         }
     }
 }
 
-impl io::Write for WindowsTapeDevice {
+impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut write_count : DWORD = 0;
         
@@ -64,10 +73,13 @@ impl io::Write for WindowsTapeDevice {
     }
 }
 
-impl RecoverableWrite<u64> for WindowsTapeDevice {
+impl<P> RecoverableWrite<P> for WindowsTapeDevice<P> where P: Clone {
 }
 
-impl TapeDevice for WindowsTapeDevice {
+impl<P> ArchivalSink<P> for WindowsTapeDevice<P> where P: Send + Clone {
+}
+
+impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
         match pos {
             io::SeekFrom::Start(target) => {

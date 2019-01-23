@@ -1,5 +1,17 @@
 use std::{io, fs, path, ffi};
-use rapidtar::{tar, tape};
+use rapidtar::{tar, tape, spanning};
+
+/// Supertrait that represents all the things a good archive sink needs to be.
+/// 
+/// TODO: The **moment** Rust gets the ability to handle multiple traits in a
+/// single trait object, delete this arbitrary supertrait immediately.
+pub trait ArchivalSink<I>: Send + io::Write + spanning::RecoverableWrite<I> {
+    
+}
+
+impl<I> ArchivalSink<I> for fs::File {
+    
+}
 
 /// Open a sink object for writing an archive (aka "tape").
 ///
@@ -53,7 +65,7 @@ use rapidtar::{tar, tape};
 /// This is the portable version of the function. It supports writes to files
 /// only. Platform-specific sink functions may support opening other kinds of
 /// writers.
-pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<io::Write>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>, u64>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<u64>>> where ffi::OsString: From<P>, P: Clone {
     let file = fs::File::create(outfile.as_ref())?;
 
     Ok(Box::new(file))

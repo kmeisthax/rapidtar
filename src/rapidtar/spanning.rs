@@ -50,7 +50,7 @@ impl<P> DataZone<P> {
     /// If the commitment range exactly matches the length of the zone, then
     /// this function returns zero.
     pub fn write_committed(&mut self, length: u64) -> Option<u64> {
-        if (self.uncommitted_length > length) {
+        if self.uncommitted_length > length {
             self.uncommitted_length -= length;
             self.committed_length += length;
 

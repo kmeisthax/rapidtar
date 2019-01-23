@@ -2,6 +2,7 @@ use std::{io, mem};
 use std::io::Write;
 
 use rapidtar::spanning::{RecoverableWrite, DataZone};
+use rapidtar::fs::ArchivalSink;
 
 /// Write implementation that ensures all data written to it is passed along to
 /// it's interior writer in identically-sized buffers of 512 * factor bytes.
@@ -134,6 +135,10 @@ impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone, W:
 
         inner_ucw
     }
+}
+
+impl<W:Write, P> ArchivalSink<P> for BlockingWriter<W, P> where W: Send + RecoverableWrite<P>, P: Send + Clone {
+    
 }
 
 impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone, W: RecoverableWrite<P> {

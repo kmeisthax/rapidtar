@@ -100,7 +100,7 @@ fn main() -> io::Result<()> {
                         eprintln!("{:?}", entry.original_path);
                     }
 
-                    match tar::serialize(&entry, &mut tarball) {
+                    match tar::serialize(&entry, tarball.as_mut()) {
                         Ok(size) => {
                             tarball_size += size;
                         },
