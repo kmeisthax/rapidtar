@@ -1,5 +1,6 @@
-use std::{io, ptr, fmt, ffi};
+use std::{io, ptr, fmt, ffi, mem};
 use std::os::windows::ffi::OsStrExt;
+use std::collections::LinkedList;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
@@ -7,14 +8,23 @@ use winapi::shared::winerror::NO_ERROR;
 use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
+use winapi::um::minwinbase::OVERLAPPED;
+use winapi::um::winbase::FILE_FLAG_OVERLAPPED;
 use num;
 use rapidtar::tape::TapeDevice;
-use rapidtar::spanning::RecoverableWrite;
+use rapidtar::spanning::{RecoverableWrite, DataZone};
 use rapidtar::fs::ArchivalSink;
+
+struct PendingIoTransaction {
+    lapped: OVERLAPPED,
+    record_data: Vec<u8>
+}
 
 pub struct WindowsTapeDevice<P = u64> where P: Sized {
     tape_device: HANDLE,
-    last_ident: Option<P>
+    current_data_zone: Option<DataZone<P>>,
+    uncommitted_data_zones: Vec<DataZone<P>>,
+    pending_io: LinkedList<PendingIoTransaction> //Linked list to prevent reallocations
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -33,7 +43,7 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     /// Open a tape device by it's NT device path.
     pub fn open_device(nt_device_path : &ffi::OsStr) -> io::Result<WindowsTapeDevice<P>> {
         let nt_device_path_ffi : Vec<WCHAR> = nt_device_path.encode_wide().collect();
-        let nt_device = unsafe { fileapi::CreateFileW(nt_device_path_ffi.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut()) };
+        let nt_device = unsafe { fileapi::CreateFileW(nt_device_path_ffi.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, FILE_FLAG_OVERLAPPED, ptr::null_mut()) };
         
         if nt_device == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
@@ -52,17 +62,31 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     pub unsafe fn from_device_handle(nt_device : HANDLE) -> WindowsTapeDevice<P> {
         WindowsTapeDevice {
             tape_device: nt_device,
-            last_ident: None
+            current_data_zone: None,
+            uncommitted_data_zones: Vec::new(),
+            pending_io: LinkedList::new()
         }
     }
 }
 
 impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut write_count : DWORD = 0;
+        self.pending_io.push_back(PendingIoTransaction {
+            lapped: unsafe { OVERLAPPED {
+                Internal: 0,
+                InternalHigh: 0,
+                u: mem::zeroed(),
+                hEvent: ptr::null_mut()
+            }},
+            record_data: Vec::with_capacity(buf.len())
+        });
         
-        if unsafe { fileapi::WriteFile(self.tape_device, buf.as_ptr() as LPCVOID, buf.len() as DWORD, &mut write_count, ptr::null_mut()) } == TRUE as BOOL {
-            Ok(write_count as usize)
+        let mut this_req : &mut PendingIoTransaction = self.pending_io.back_mut().expect("How the hell is this empty");
+        unsafe { this_req.record_data.set_len(buf.len()) };
+        this_req.record_data.copy_from_slice(buf);
+        
+        if unsafe { fileapi::WriteFileEx(self.tape_device, this_req.record_data.as_ptr() as LPCVOID, this_req.record_data.len() as DWORD, &mut this_req.lapped, None) } == TRUE as BOOL {
+            Ok(this_req.record_data.len() as usize)
         } else {
             Err(io::Error::last_os_error())
         }
