@@ -1,10 +1,10 @@
 use std::{io, ptr, fmt, ffi, mem};
 use std::os::windows::ffi::OsStrExt;
 use std::collections::LinkedList;
-use winapi::um::{winbase, fileapi};
+use winapi::um::{winbase, fileapi, ioapiset, synchapi, handleapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
-use winapi::shared::winerror::NO_ERROR;
+use winapi::shared::winerror::{NO_ERROR, ERROR_IO_PENDING};
 use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
@@ -67,16 +67,50 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
             pending_io: LinkedList::new()
         }
     }
+    
+    /// Acknowledge any previously queued I/O requests and deallocate them if
+    /// possible.
+    fn acknowledge_pending_io(&mut self) -> io::Result<usize> {
+        while !self.pending_io.is_empty() {
+            if let Some(pending_io) = self.pending_io.front_mut() {
+                let mut numbytes = 0;
+                if unsafe { ioapiset::GetOverlappedResult(self.tape_device, &mut pending_io.lapped, &mut numbytes, FALSE as BOOL) } == FALSE as BOOL {
+                    let error = io::Error::last_os_error();
+
+                    match error.raw_os_error() {
+                        Some(errcode) => {
+                            if errcode == ERROR_IO_PENDING as i32 {
+                                return Ok(0)
+                            }
+
+                            return Err(error);
+                        },
+                        _ => return Err(error),
+                    }
+                }
+                
+                unsafe { handleapi::CloseHandle(pending_io.lapped.hEvent) };
+            }
+            
+            self.pending_io.pop_front();
+        }
+        
+        Ok(0)
+    }
 }
 
 impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.acknowledge_pending_io();
+        
+        let hevent = unsafe { synchapi::CreateEventW(ptr::null_mut(), FALSE as BOOL, FALSE as BOOL, ptr::null()) };
+        
         self.pending_io.push_back(PendingIoTransaction {
             lapped: unsafe { OVERLAPPED {
                 Internal: 0,
                 InternalHigh: 0,
                 u: mem::zeroed(),
-                hEvent: ptr::null_mut()
+                hEvent: hevent
             }},
             record_data: Vec::with_capacity(buf.len())
         });
@@ -85,10 +119,21 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
         unsafe { this_req.record_data.set_len(buf.len()) };
         this_req.record_data.copy_from_slice(buf);
         
-        if unsafe { fileapi::WriteFileEx(self.tape_device, this_req.record_data.as_ptr() as LPCVOID, this_req.record_data.len() as DWORD, &mut this_req.lapped, None) } == TRUE as BOOL {
+        if unsafe { fileapi::WriteFile(self.tape_device, this_req.record_data.as_ptr() as LPCVOID, this_req.record_data.len() as DWORD, ptr::null_mut(), &mut this_req.lapped) } == TRUE as BOOL {
             Ok(this_req.record_data.len() as usize)
         } else {
-            Err(io::Error::last_os_error())
+            let error = io::Error::last_os_error();
+            
+            match error.raw_os_error() {
+                Some(errcode) => {
+                    if errcode == ERROR_IO_PENDING as i32 {
+                        return Ok(this_req.record_data.len() as usize)
+                    }
+                    
+                    return Err(error);
+                },
+                _ => return Err(error),
+            }
         }
     }
     

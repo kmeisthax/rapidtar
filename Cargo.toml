@@ -15,7 +15,7 @@ num-traits = "0.2.6"
 rand = "0.6.4"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
+winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror', 'ioapiset', 'synchapi'] }
 
 [lib]
 name = "rapidtar"
