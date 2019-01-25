@@ -32,9 +32,7 @@ enum TarOperation {
 
 fn main() -> io::Result<()> {
     //Here's some configuration!
-    let mut channel_queue_depth = 1024;
-    let mut parallel_io_limit = 32;
-    let mut blocking_factor = 20; //TAR standard, but suboptimal for modern tape
+    let mut tarconfig = tar::Configuration::default();
     let mut basepath = std::env::current_dir()?.to_string_lossy().to_mut().to_string(); //TODO: If no current working directory exists rapidtar doesn't work.
         //TODO: If CWD is not a valid Unicode string the default basepath makes no sense.
     let mut outfile = "out.tar".to_string();
@@ -57,9 +55,9 @@ fn main() -> io::Result<()> {
         ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
         ap.refer(&mut basepath).add_option(&["-C", "--directory"], Store, "The base path of the archival operation. Defaults to current working directory.");
-        ap.refer(&mut channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
-        ap.refer(&mut parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
-        ap.refer(&mut blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
+        ap.refer(&mut tarconfig.channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
+        ap.refer(&mut tarconfig.parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
+        ap.refer(&mut tarconfig.blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
         ap.refer(&mut traversal_list).add_argument("file", Collect, "The files to archive");
         
         ap.parse_args_or_exit();
@@ -71,12 +69,12 @@ fn main() -> io::Result<()> {
             //rudimentary backpressure mechanism. If there are 512 files already queued,
             //then the 512 threads in the reading pool will eventually block, resulting
             //in a maximum number of 1024 files - 1MB each - in memory at one time.
-            let (sender, reciever) = sync_channel(channel_queue_depth);
+            let (sender, reciever) = sync_channel(tarconfig.channel_queue_depth);
 
-            rayon::ThreadPoolBuilder::new().num_threads(parallel_io_limit + 1).build().unwrap().scope(move |s| {
+            rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit + 1).build().unwrap().scope(move |s| {
                 let start_instant = time::Instant::now();
                 let reciever : Receiver<tar::HeaderGenResult> = reciever;
-                let mut tarball = open_sink(outfile, Some(blocking_factor)).unwrap();
+                let mut tarball = open_sink(outfile, Some(tarconfig.blocking_factor)).unwrap();
 
                 env::set_current_dir(basepath).unwrap();
 
