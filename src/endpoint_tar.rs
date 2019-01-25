@@ -70,49 +70,48 @@ fn main() -> io::Result<()> {
             //then the 512 threads in the reading pool will eventually block, resulting
             //in a maximum number of 1024 files - 1MB each - in memory at one time.
             let (sender, reciever) = sync_channel(tarconfig.channel_queue_depth);
+            
+            let start_instant = time::Instant::now();
+            let reciever : Receiver<tar::HeaderGenResult> = reciever;
+            let mut tarball = open_sink(outfile, Some(tarconfig.blocking_factor)).unwrap();
+            let parallel_read_pool = rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit).build().unwrap();
+            
+            env::set_current_dir(basepath).unwrap();
 
-            rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit + 1).build().unwrap().scope(move |s| {
-                let start_instant = time::Instant::now();
-                let reciever : Receiver<tar::HeaderGenResult> = reciever;
-                let mut tarball = open_sink(outfile, Some(tarconfig.blocking_factor)).unwrap();
+            for traversal_path in traversal_list {
+                let child_sender = sender.clone();
 
-                env::set_current_dir(basepath).unwrap();
+                parallel_read_pool.spawn(move || {
+                    traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
+                        c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                        Ok(())
+                    }, child_sender, None);
+                });
+            }
 
-                for traversal_path in traversal_list {
-                    let child_sender = sender.clone();
+            drop(sender); //Kill the original sender, else the whole thread network deadlocks.
 
-                    s.spawn(move |_| {
-                        traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                            c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
-                            Ok(())
-                        }, child_sender, None);
-                    });
+            let mut tarball_size = 0;
+
+            while let Ok(entry) = reciever.recv() {
+                if verbose {
+                    eprintln!("{:?}", entry.original_path);
                 }
 
-                drop(sender); //Kill the original sender, else the whole thread network deadlocks.
-
-                let mut tarball_size = 0;
-
-                while let Ok(entry) = reciever.recv() {
-                    if verbose {
-                        eprintln!("{:?}", entry.original_path);
-                    }
-
-                    match tar::serialize(&entry, tarball.as_mut()) {
-                        Ok(size) => {
-                            tarball_size += size;
-                        },
-                        Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
-                    }
+                match tar::serialize(&entry, tarball.as_mut()) {
+                    Ok(size) => {
+                        tarball_size += size;
+                    },
+                    Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
                 }
+            }
 
-                tarball.write_all(&vec![0; 1024]).unwrap();
-                tarball.flush().unwrap();
+            tarball.write_all(&vec![0; 1024]).unwrap();
+            tarball.flush().unwrap();
 
-                let write_time = start_instant.elapsed();
+            let write_time = start_instant.elapsed();
 
-                eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
-            });
+            eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
 
             Ok(())
         },
