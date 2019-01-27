@@ -98,6 +98,8 @@ fn main() -> io::Result<()> {
                     eprintln!("{:?}", entry.original_path);
                 }
 
+                tarball.begin_data_zone(tar::RecoveryEntry::new_from_headergen(&entry));
+
                 match tar::serialize(&entry, tarball.as_mut()) {
                     Ok(size) => {
                         tarball_size += size;

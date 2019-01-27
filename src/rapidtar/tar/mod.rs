@@ -144,6 +144,7 @@ impl Default for Configuration {
 /// An abstract representation of the data contained within a tarball header.
 /// 
 /// Some header formats may or may not actually use or provide these values.
+#[derive(Clone)]
 pub struct TarHeader {
     pub path: Box<path::PathBuf>,
     pub unix_mode: u32,
@@ -184,6 +185,30 @@ pub struct HeaderGenResult {
     /// Optional cached file stream data. If populated, serialization should
     /// utilize this data while awaiting further data to copy to archive.
     pub file_prefix: Option<Vec<u8>>
+}
+
+/// Information on how to recover from a failed serialization.
+pub struct RecoveryEntry {
+    /// The abstract tar header which was used to produce the encoded header.
+    pub tar_header: TarHeader,
+
+    /// The path of the file as would have been entered by the user, suitable
+    /// for display in error messages and the like.
+    pub original_path: Box<path::PathBuf>,
+
+    /// A valid, canonicalized path which can be used to open and read data
+    /// for archival.
+    pub canonical_path: Box<path::PathBuf>,
+}
+
+impl RecoveryEntry {
+    pub fn new_from_headergen(hg : &HeaderGenResult) -> RecoveryEntry {
+        RecoveryEntry {
+            tar_header: hg.tar_header.clone(),
+            original_path: hg.original_path.clone(),
+            canonical_path: hg.canonical_path.clone(),
+        }
+    }
 }
 
 /// Given a directory entry's path and metadata, produce a valid HeaderGenResult

@@ -65,7 +65,7 @@ impl<I> ArchivalSink<I> for fs::File {
 /// This is the portable version of the function. It supports writes to files
 /// only. Platform-specific sink functions may support opening other kinds of
 /// writers.
-pub fn open_sink<P: AsRef<path::Path>, u64>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<u64>>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone {
     let file = fs::File::create(outfile.as_ref())?;
 
     Ok(Box::new(file))
