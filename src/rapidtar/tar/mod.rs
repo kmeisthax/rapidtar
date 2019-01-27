@@ -7,6 +7,13 @@ mod ustar;
 /// Support for Portable Archive eXchange tar headers.
 mod pax;
 
+/// Code for generating tar headers of various kinds.
+pub mod header;
+
+/// Recovery code for handling surprise recoverable failures (e.g. volume full)
+/// necessary for spanning
+pub mod recovery;
+
 use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
 use rapidtar::fs::{ArchivalSink, get_unix_mode, get_file_type};
@@ -24,7 +31,7 @@ use rapidtar::stream::stream;
 /// The `canonicalized_tar_path` function was written specifically to match the
 /// quirks of GNU tar, especially it's behavior of transforming Windows paths
 /// into UNIX-looking equivalents. (e.g. C:\test.txt becomes c\test.txt)
-pub fn canonicalized_tar_path(dirpath: &path::Path, filetype: TarFileType) -> String {
+pub fn canonicalized_tar_path(dirpath: &path::Path, filetype: header::TarFileType) -> String {
     let mut relapath_encoded : String = String::with_capacity(255);
     let mut first = true;
     
@@ -81,48 +88,11 @@ pub fn canonicalized_tar_path(dirpath: &path::Path, filetype: TarFileType) -> St
         }
     }
     
-    if let TarFileType::Directory = filetype {
+    if let header::TarFileType::Directory = filetype {
         relapath_encoded.push('/');
     }
     
     relapath_encoded
-}
-
-/// An abstract representation of the TAR typeflag field.
-/// 
-/// # Vendor-specific files
-/// 
-/// Certain tar file formats allow opaque file types, those are represented as
-/// Other.
-#[derive(Copy, Clone)]
-pub enum TarFileType {
-    FileStream,
-    HardLink,
-    SymbolicLink,
-    CharacterDevice,
-    BlockDevice,
-    Directory,
-    FIFOPipe,
-    Other(char)
-}
-
-impl TarFileType {
-    /// Serialize a file type into a given type character flag.
-    ///
-    /// The set of file types are taken from the USTar format and represent all
-    /// standard types. Nonstandard types can be represented as `Other`.
-    pub fn type_flag(&self) -> char {
-        match self {
-            TarFileType::FileStream => '0',
-            TarFileType::HardLink => '1',
-            TarFileType::SymbolicLink => '2',
-            TarFileType::CharacterDevice => '3',
-            TarFileType::BlockDevice => '4',
-            TarFileType::Directory => '5',
-            TarFileType::FIFOPipe => '6',
-            TarFileType::Other(f) => f.clone()
-        }
-    }
 }
 
 pub struct Configuration {
@@ -141,190 +111,17 @@ impl Default for Configuration {
     }
 }
 
-/// An abstract representation of the data contained within a tarball header.
-/// 
-/// Some header formats may or may not actually use or provide these values.
-#[derive(Clone)]
-pub struct TarHeader {
-    pub path: Box<path::PathBuf>,
-    pub unix_mode: u32,
-    pub unix_uid: u32,
-    pub unix_gid: u32,
-    pub file_size: u64,
-    pub mtime: Option<time::SystemTime>,
-    pub file_type: TarFileType,
-    pub symlink_path: Option<Box<path::PathBuf>>,
-    pub unix_uname: String,
-    pub unix_gname: String,
-    pub unix_devmajor: u32,
-    pub unix_devminor: u32,
-    pub atime: Option<time::SystemTime>,
-    pub birthtime: Option<time::SystemTime>,
-}
-
-/// A serialized tar header, ready for serialization into an archive.
-///
-/// # File caching
-///
-/// A HeaderGen
-pub struct HeaderGenResult {
-    /// The abstract tar header which was used to produce the encoded header.
-    pub tar_header: TarHeader,
-
-    /// The encoded tar header, suitable for direct copy into an archive file.
-    pub encoded_header: Vec<u8>,
-
-    /// The path of the file as would have been entered by the user, suitable
-    /// for display in error messages and the like.
-    pub original_path: Box<path::PathBuf>,
-
-    /// A valid, canonicalized path which can be used to open and read data
-    /// for archival.
-    pub canonical_path: Box<path::PathBuf>,
-
-    /// Optional cached file stream data. If populated, serialization should
-    /// utilize this data while awaiting further data to copy to archive.
-    pub file_prefix: Option<Vec<u8>>
-}
-
-/// Information on how to recover from a failed serialization.
-pub struct RecoveryEntry {
-    /// The abstract tar header which was used to produce the encoded header.
-    pub tar_header: TarHeader,
-
-    /// The path of the file as would have been entered by the user, suitable
-    /// for display in error messages and the like.
-    pub original_path: Box<path::PathBuf>,
-
-    /// A valid, canonicalized path which can be used to open and read data
-    /// for archival.
-    pub canonical_path: Box<path::PathBuf>,
-}
-
-impl RecoveryEntry {
-    pub fn new_from_headergen(hg : &HeaderGenResult) -> RecoveryEntry {
-        RecoveryEntry {
-            tar_header: hg.tar_header.clone(),
-            original_path: hg.original_path.clone(),
-            canonical_path: hg.canonical_path.clone(),
-        }
-    }
-}
-
-/// Given a directory entry's path and metadata, produce a valid HeaderGenResult
-/// for a given path.
-/// 
-/// headergen attempts to precache the file's contents in the HeaderGenResult.
-/// A maximum of 1MB is read and stored in the HeaderGenResult. If the read
-/// fails or the item is not a file then the file_prefix field will be None.
-/// 
-/// TODO: Make headergen read-ahead caching maximum configurable.
-pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
-    let tarheader = TarHeader {
-        path: Box::new(normalize::normalize(&archival_path)),
-        unix_mode: get_unix_mode(entry_metadata)?,
-        
-        //TODO: Get plausible IDs for these.
-        unix_uid: 0,
-        unix_gid: 0,
-        file_size: entry_metadata.len(),
-        mtime: entry_metadata.modified().ok(),
-        
-        //TODO: All of these are placeholders.
-        file_type: get_file_type(entry_metadata)?,
-        symlink_path: None,
-        unix_uname: "root".to_string(),
-        unix_gname: "root".to_string(),
-        unix_devmajor: 0,
-        unix_devminor: 0,
-        
-        atime: entry_metadata.accessed().ok(),
-        birthtime: entry_metadata.created().ok(),
-    };
-    
-    let mut concrete_tarheader = pax::pax_header(&tarheader)?;
-    pax::checksum_header(&mut concrete_tarheader);
-    
-    //TODO: This should be unnecessary as we are usually handed data from traverse
-    let canonical_path = fs::canonicalize(entry_path).unwrap();
-    
-    let readahead = match tarheader.file_type {
-        TarFileType::FileStream => {
-            let cache_len = cmp::min(tarheader.file_size, 64*1024);
-            let mut filebuf = Vec::with_capacity(cache_len as usize);
-
-            //TODO: Can we soundly replace the following code with using unsafe{} to
-            //hand read an uninitialized block of memory? There's actually a bit of an
-            //issue over in Rust core about this concerning read_to_end...
-            
-            //If LLVM hadn't inherited the 'undefined behavior' nonsense from
-            //ISO C, I'd be fine with doing this unsafely.
-            filebuf.resize(cache_len as usize, 0);
-            
-            //Okay, I still have to keep track of how much data the reader has
-            //actually read, too.
-            let mut final_cache_len = 0;
-            
-            match fs::File::open(canonical_path.clone()) {
-                Ok(mut file) => {
-                    loop {
-                        match file.read(&mut filebuf[final_cache_len..]) {
-                            Ok(size) => {
-                                final_cache_len += size;
-
-                                if size == 0 || final_cache_len == filebuf.len() {
-                                    break;
-                                }
-
-                                if cache_len == final_cache_len as u64 {
-                                    break;
-                                }
-                            },
-                            Err(e) => {
-                                match e.kind() {
-                                    io::ErrorKind::Interrupted => {},
-                                    _ => {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    //I explained this elsewhere, but Vec<u8> shrinking SUUUUCKS
-                    assert!(final_cache_len <= filebuf.capacity());
-                    unsafe {
-                        filebuf.set_len(final_cache_len);
-                    }
-                    
-                    Some(filebuf)
-                },
-                Err(_) => {
-                    None
-                }
-            }
-        },
-        _ => None
-    };
-    
-    Ok(HeaderGenResult{tar_header: tarheader,
-        encoded_header: concrete_tarheader,
-        original_path: Box::new(archival_path.to_path_buf()),
-        canonical_path: Box::new(canonical_path),
-        file_prefix: readahead})
-}
-
 /// Given a traversal result, attempt to serialize it's data as tar format data
 /// in the given tarball writer.
 /// 
 /// Returns the number of bytes written to the file/tape.
-pub fn serialize<I>(traversal: &HeaderGenResult, tarball: &mut ArchivalSink<I>) -> io::Result<u64> {
+pub fn serialize<I>(traversal: &header::HeaderGenResult, tarball: &mut ArchivalSink<I>) -> io::Result<u64> {
     let mut tarball_size : u64 = 0;
     
     tarball_size += traversal.encoded_header.len() as u64;
     tarball.write_all(&traversal.encoded_header)?;
     
-    if let TarFileType::FileStream = traversal.tar_header.file_type {
+    if let header::TarFileType::FileStream = traversal.tar_header.file_type {
         let mut stream_needed = true;
         let mut stream_start = 0;
         

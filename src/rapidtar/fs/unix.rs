@@ -25,21 +25,21 @@ pub fn get_unix_mode(metadata: &fs::Metadata) -> io::Result<u32> {
 ///
 /// UNIX domain sockets are not supported by this function and yield an error,
 /// as they have no valid tar representation.
-pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::TarFileType> {
+pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFileType> {
     if metadata.file_type().is_block_device() {
-        Ok(tar::TarFileType::BlockDevice)
+        Ok(tar::header::TarFileType::BlockDevice)
     } else if metadata.file_type().is_char_device() {
-        Ok(tar::TarFileType::CharacterDevice)
+        Ok(tar::header::TarFileType::CharacterDevice)
     } else if metadata.file_type().is_fifo() {
-        Ok(tar::TarFileType::FIFOPipe)
+        Ok(tar::header::TarFileType::FIFOPipe)
     } else if metadata.file_type().is_socket() {
         Err(io::Error::new(io::ErrorKind::InvalidData, "Sockets are not archivable"))
     } else if metadata.file_type().is_dir() {
-        Ok(tar::TarFileType::Directory)
+        Ok(tar::header::TarFileType::Directory)
     } else if metadata.file_type().is_file() {
-        Ok(tar::TarFileType::FileStream)
+        Ok(tar::header::TarFileType::FileStream)
     } else if metadata.file_type().is_symlink() {
-        Ok(tar::TarFileType::SymbolicLink)
+        Ok(tar::header::TarFileType::SymbolicLink)
     } else {
         Err(io::Error::new(io::ErrorKind::InvalidInput, "Metadata did not yield any valid file type for tarball"))
     }

@@ -2,7 +2,8 @@ use std::{io, path, time, ffi};
 use rapidtar::tar::ustar;
 use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
-use rapidtar::tar::{TarHeader, TarFileType, canonicalized_tar_path};
+use rapidtar::tar::header::{TarHeader, TarFileType};
+use rapidtar::tar::canonicalized_tar_path;
 
 /// Format a key-value pair in pax format.
 /// 
@@ -309,7 +310,7 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 mod tests {
     use std::{path};
     use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename, canonicalized_tar_path};
-    use rapidtar::tar::TarFileType;
+    use rapidtar::tar::header::TarFileType;
     
     #[test]
     fn pax_attribute() {

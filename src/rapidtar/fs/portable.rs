@@ -167,13 +167,13 @@ pub fn get_unix_mode(metadata: &fs::Metadata) -> io::Result<u32> {
 /// directory, a file, or a symbolic link. It may error if the platform
 /// implementation of `fs::Metadata` indicates none of the given file types
 /// apply; however, this is a violation of Rust's specifications.
-pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::TarFileType> {
+pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFileType> {
     if metadata.file_type().is_dir() {
-        Ok(tar::TarFileType::Directory)
+        Ok(tar::header::TarFileType::Directory)
     } else if metadata.file_type().is_file() {
-        Ok(tar::TarFileType::FileStream)
+        Ok(tar::header::TarFileType::FileStream)
     } else if metadata.file_type().is_symlink() {
-        Ok(tar::TarFileType::SymbolicLink)
+        Ok(tar::header::TarFileType::SymbolicLink)
     } else {
         Err(io::Error::new(io::ErrorKind::InvalidInput, "Metadata did not yield any valid file type for tarball"))
     }

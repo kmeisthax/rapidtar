@@ -72,7 +72,7 @@ fn main() -> io::Result<()> {
             let (sender, reciever) = sync_channel(tarconfig.channel_queue_depth);
             
             let start_instant = time::Instant::now();
-            let reciever : Receiver<tar::HeaderGenResult> = reciever;
+            let reciever : Receiver<tar::header::HeaderGenResult> = reciever;
             let mut tarball = open_sink(outfile, Some(tarconfig.blocking_factor)).unwrap();
             let parallel_read_pool = rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit).build().unwrap();
             
@@ -82,8 +82,8 @@ fn main() -> io::Result<()> {
                 let child_sender = sender.clone();
 
                 parallel_read_pool.spawn(move || {
-                    traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                        c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                    traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
+                        c.send(tar::header::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                         Ok(())
                     }, child_sender, None);
                 });
@@ -98,7 +98,7 @@ fn main() -> io::Result<()> {
                     eprintln!("{:?}", entry.original_path);
                 }
 
-                tarball.begin_data_zone(tar::RecoveryEntry::new_from_headergen(&entry));
+                tarball.begin_data_zone(tar::recovery::RecoveryEntry::new_from_headergen(&entry));
 
                 match tar::serialize(&entry, tarball.as_mut()) {
                     Ok(size) => {
