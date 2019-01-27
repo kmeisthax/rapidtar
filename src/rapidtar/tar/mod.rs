@@ -18,7 +18,6 @@ use std::{io, path, fs, time, cmp};
 use std::io::{Read, Seek};
 use rapidtar::fs::{ArchivalSink, get_unix_mode, get_file_type};
 use rapidtar::normalize;
-use rapidtar::stream::stream;
 
 /// Given a filesystem path and the file's type, canonicalize the path for tar
 /// archival.
