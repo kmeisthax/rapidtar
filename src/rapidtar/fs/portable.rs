@@ -65,7 +65,7 @@ impl<I> ArchivalSink<I> for fs::File {
 /// This is the portable version of the function. It supports writes to files
 /// only. Platform-specific sink functions may support opening other kinds of
 /// writers.
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, _blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone {
     let file = fs::File::create(outfile.as_ref())?;
 
     Ok(Box::new(file))
@@ -96,7 +96,7 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<us
 ///
 /// This is the portable version of the function. Since portable tape access
 /// isn't a thing that makes sense, this function only returns errors.
-pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_tape<P: AsRef<path::Path>>(_tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
     Err(io::Error::new(io::ErrorKind::Other, "Magnetic tape control is not implemented for this operating system."))
 }
 

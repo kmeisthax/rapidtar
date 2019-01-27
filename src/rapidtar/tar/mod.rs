@@ -14,10 +14,9 @@ pub mod header;
 /// necessary for spanning
 pub mod recovery;
 
-use std::{io, path, fs, time, cmp};
-use std::io::{Read, Seek};
-use rapidtar::fs::{ArchivalSink, get_unix_mode, get_file_type};
-use rapidtar::normalize;
+use std::{io, path, fs};
+use std::io::{Seek};
+use rapidtar::fs::{ArchivalSink};
 
 /// Given a filesystem path and the file's type, canonicalize the path for tar
 /// archival.

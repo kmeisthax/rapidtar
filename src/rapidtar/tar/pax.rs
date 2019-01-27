@@ -55,8 +55,7 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
 pub fn format_pax_legacy_filename(canonical_path: &String) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
-    let mut first = true;
-    let mut is_ascii = canonical_path.is_ascii();
+    let is_ascii = canonical_path.is_ascii();
     let mut relapath_encoded = canonical_path.replace(|c: char| !c.is_ascii(), "").into_bytes();
     relapath_encoded.push(0);
     

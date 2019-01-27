@@ -17,7 +17,7 @@ pub fn normalize<P: AsRef<path::Path>>(inpath: &P) -> path::PathBuf where P: fmt
             path::Component::Prefix(_) => {
                 outpath.push(component);
             },
-            path::Component::Normal(name) => {
+            path::Component::Normal(_) => {
                 outpath.push(component);
             }
         }

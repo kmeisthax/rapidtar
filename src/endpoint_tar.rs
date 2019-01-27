@@ -11,11 +11,10 @@ extern crate winapi;
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
-use std::{io, time, env, path};
+use std::{io, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rapidtar::{tar, traverse, normalize};
+use rapidtar::{tar, traverse};
 use rapidtar::fs::open_sink;
-use pathdiff::diff_paths;
 
 use std::io::Write;
 
@@ -85,7 +84,7 @@ fn main() -> io::Result<()> {
                     traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
                         c.send(tar::header::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                         Ok(())
-                    }, child_sender, None);
+                    }, child_sender, None).unwrap();
                 });
             }
 
