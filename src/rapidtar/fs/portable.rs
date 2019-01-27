@@ -65,7 +65,7 @@ impl<I> ArchivalSink<I> for fs::File {
 /// This is the portable version of the function. It supports writes to files
 /// only. Platform-specific sink functions may support opening other kinds of
 /// writers.
-pub fn open_sink<P: AsRef<path::Path>, u64>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<u64>>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, _blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone {
     let file = fs::File::create(outfile.as_ref())?;
 
     Ok(Box::new(file))
@@ -96,7 +96,7 @@ pub fn open_sink<P: AsRef<path::Path>, u64>(outfile: P, blocking_factor: Option<
 ///
 /// This is the portable version of the function. Since portable tape access
 /// isn't a thing that makes sense, this function only returns errors.
-pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_tape<P: AsRef<path::Path>>(_tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
     Err(io::Error::new(io::ErrorKind::Other, "Magnetic tape control is not implemented for this operating system."))
 }
 
@@ -167,13 +167,13 @@ pub fn get_unix_mode(metadata: &fs::Metadata) -> io::Result<u32> {
 /// directory, a file, or a symbolic link. It may error if the platform
 /// implementation of `fs::Metadata` indicates none of the given file types
 /// apply; however, this is a violation of Rust's specifications.
-pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::TarFileType> {
+pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFileType> {
     if metadata.file_type().is_dir() {
-        Ok(tar::TarFileType::Directory)
+        Ok(tar::header::TarFileType::Directory)
     } else if metadata.file_type().is_file() {
-        Ok(tar::TarFileType::FileStream)
+        Ok(tar::header::TarFileType::FileStream)
     } else if metadata.file_type().is_symlink() {
-        Ok(tar::TarFileType::SymbolicLink)
+        Ok(tar::header::TarFileType::SymbolicLink)
     } else {
         Err(io::Error::new(io::ErrorKind::InvalidInput, "Metadata did not yield any valid file type for tarball"))
     }

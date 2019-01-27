@@ -1,4 +1,4 @@
-use std::{io, mem};
+use std::io;
 use std::io::Write;
 
 use rapidtar::spanning::{RecoverableWrite, DataZone};
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(zones[1].uncommitted_length, 512);
         assert_eq!(zones[1].committed_length, 0);
 
-        blk.flush();
+        blk.flush().unwrap();
 
         let zones_2 = blk.uncommitted_writes();
 

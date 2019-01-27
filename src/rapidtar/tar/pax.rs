@@ -2,7 +2,8 @@ use std::{io, path, time, ffi};
 use rapidtar::tar::ustar;
 use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string};
 use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
-use rapidtar::tar::{TarHeader, TarFileType, canonicalized_tar_path};
+use rapidtar::tar::header::{TarHeader, TarFileType};
+use rapidtar::tar::canonicalized_tar_path;
 
 /// Format a key-value pair in pax format.
 /// 
@@ -54,8 +55,7 @@ fn format_pax_time(dirtime: &time::SystemTime) -> io::Result<String> {
 /// Unicode sequences, for whatever reason, will see said sequences replaced
 /// with U+FFFD.
 pub fn format_pax_legacy_filename(canonical_path: &String) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
-    let mut first = true;
-    let mut is_ascii = canonical_path.is_ascii();
+    let is_ascii = canonical_path.is_ascii();
     let mut relapath_encoded = canonical_path.replace(|c: char| !c.is_ascii(), "").into_bytes();
     relapath_encoded.push(0);
     
@@ -211,6 +211,19 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         extended_stream.extend(format_pax_attribute("LIBARCHIVE.creationtime", &format_pax_time(&birthtime)?));
     }
     
+    if let Some(ref recovery_path) = tarheader.recovery_path {
+        let canonical_recovery_path = canonicalized_tar_path(&recovery_path.clone(), tarheader.file_type);
+        extended_stream.extend(format_pax_attribute("GNU.volume.filename", &canonical_recovery_path));
+    }
+
+    if let Some(recovery_total_size) = tarheader.recovery_total_size {
+        extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_total_size)));
+    }
+
+    if let Some(recovery_seek_offset) = tarheader.recovery_seek_offset {
+        extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
+    }
+
     let mut header : Vec<u8> = Vec::with_capacity(1536);
     
     //sup dawg, I heard u like headers so we put a header on your header
@@ -309,7 +322,7 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 mod tests {
     use std::{path};
     use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename, canonicalized_tar_path};
-    use rapidtar::tar::TarFileType;
+    use rapidtar::tar::header::TarFileType;
     
     #[test]
     fn pax_attribute() {

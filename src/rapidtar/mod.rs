@@ -18,9 +18,3 @@ pub mod normalize;
 
 /// Facilities for tracking data within a write buffer for error recovery.
 pub mod spanning;
-
-/// Basic result types for functions which can partially succeed.
-pub mod result;
-
-/// Utilities for efficient I/O copies.
-pub mod stream;

@@ -11,11 +11,10 @@ extern crate winapi;
 mod rapidtar;
 
 use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
-use std::{io, time, env, path};
+use std::{io, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rapidtar::{tar, traverse, normalize};
+use rapidtar::{tar, traverse};
 use rapidtar::fs::open_sink;
-use pathdiff::diff_paths;
 
 use std::io::Write;
 
@@ -72,7 +71,7 @@ fn main() -> io::Result<()> {
             let (sender, reciever) = sync_channel(tarconfig.channel_queue_depth);
             
             let start_instant = time::Instant::now();
-            let reciever : Receiver<tar::HeaderGenResult> = reciever;
+            let reciever : Receiver<tar::header::HeaderGenResult> = reciever;
             let mut tarball = open_sink(outfile, Some(tarconfig.blocking_factor)).unwrap();
             let parallel_read_pool = rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit).build().unwrap();
             
@@ -82,10 +81,10 @@ fn main() -> io::Result<()> {
                 let child_sender = sender.clone();
 
                 parallel_read_pool.spawn(move || {
-                    traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::HeaderGenResult>| {
-                        c.send(tar::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                    traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
+                        c.send(tar::header::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
                         Ok(())
-                    }, child_sender, None);
+                    }, child_sender, None).unwrap();
                 });
             }
 
@@ -97,6 +96,8 @@ fn main() -> io::Result<()> {
                 if verbose {
                     eprintln!("{:?}", entry.original_path);
                 }
+
+                tarball.begin_data_zone(tar::recovery::RecoveryEntry::new_from_headergen(&entry));
 
                 match tar::serialize(&entry, tarball.as_mut()) {
                     Ok(size) => {

@@ -77,7 +77,7 @@ pub trait RecoverableWrite<P> : io::Write {
     ///
     /// A data zone represents a range of bytes in the written stream which can
     /// be attributed to a single source, such as a file being archived.
-    fn begin_data_zone(&mut self, ident: P) {
+    fn begin_data_zone(&mut self, _ident: P) {
 
     }
 
