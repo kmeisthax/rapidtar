@@ -60,6 +60,9 @@ pub struct TarHeader {
     pub unix_devminor: u32,
     pub atime: Option<time::SystemTime>,
     pub birthtime: Option<time::SystemTime>,
+    pub recovery_path: Option<Box<path::PathBuf>>,
+    pub recovery_total_size: Option<usize>,
+    pub recovery_seek_offset: Option<usize>,
 }
 
 /// A serialized tar header, ready for serialization into an archive.
@@ -116,6 +119,10 @@ pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_meta
 
         atime: entry_metadata.accessed().ok(),
         birthtime: entry_metadata.created().ok(),
+
+        recovery_path: None,
+        recovery_total_size: None,
+        recovery_seek_offset: None
     };
 
     let mut concrete_tarheader = pax::pax_header(&tarheader)?;

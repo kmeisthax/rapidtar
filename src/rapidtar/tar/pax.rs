@@ -211,6 +211,19 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         extended_stream.extend(format_pax_attribute("LIBARCHIVE.creationtime", &format_pax_time(&birthtime)?));
     }
     
+    if let Some(ref recovery_path) = tarheader.recovery_path {
+        let canonical_recovery_path = canonicalized_tar_path(&recovery_path.clone(), tarheader.file_type);
+        extended_stream.extend(format_pax_attribute("GNU.volume.filename", &canonical_recovery_path));
+    }
+
+    if let Some(recovery_total_size) = tarheader.recovery_total_size {
+        extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_total_size)));
+    }
+
+    if let Some(recovery_seek_offset) = tarheader.recovery_seek_offset {
+        extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
+    }
+
     let mut header : Vec<u8> = Vec::with_capacity(1536);
     
     //sup dawg, I heard u like headers so we put a header on your header
