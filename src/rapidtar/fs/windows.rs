@@ -13,7 +13,7 @@ pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 /// 
 /// This is the Windows version of the function. It supports writes to files
 /// and tape devices.
-pub fn open_sink<P: AsRef<path::Path>>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<u64>>> where ffi::OsString: From<P>, P: Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone {
     let mut is_tape = false;
     
     {

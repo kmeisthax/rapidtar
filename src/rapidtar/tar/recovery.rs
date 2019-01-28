@@ -2,6 +2,7 @@ use std::path;
 use rapidtar::tar::header::{TarHeader, HeaderGenResult};
 
 /// Information on how to recover from a failed serialization.
+#[derive(Clone)]
 pub struct RecoveryEntry {
     /// The abstract tar header which was used to produce the encoded header.
     pub tar_header: TarHeader,
