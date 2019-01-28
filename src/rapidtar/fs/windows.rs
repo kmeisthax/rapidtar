@@ -2,6 +2,7 @@ use std::{io, fs, ffi, path, thread, time};
 use rapidtar::tape;
 use rapidtar::tape::windows::WindowsTapeDevice;
 use rapidtar::blocking::BlockingWriter;
+use rapidtar::concurrentbuf::ConcurrentWriteBuffer;
 
 pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 
@@ -41,9 +42,9 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<us
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
                 Ok(mut tape) => {
                     if let Some(blocksize) = blocking_factor {
-                        return Ok(Box::new(BlockingWriter::new_with_factor(tape, blocksize)));
+                        return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, 100 * 1024 * 1024), blocksize)));
                     } else {
-                        return Ok(Box::new(tape));
+                        return Ok(Box::new(ConcurrentWriteBuffer::new(tape, 100 * 1024 * 1024)));
                     }
                 },
                 Err(e) => {
