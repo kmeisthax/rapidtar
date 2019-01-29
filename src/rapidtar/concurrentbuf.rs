@@ -141,7 +141,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
             }
         }
         
-        self.uncommitted_data_zones = self.uncommitted_data_zones.split_off(first_uncommitted);
+        self.uncommitted_data_zones.drain(..first_uncommitted);
         
         if commit_remain > 0 {
             if let Some(ref mut curzone) = self.current_data_zone {
@@ -208,6 +208,7 @@ impl<T, P> io::Write for ConcurrentWriteBuffer<T, P> where T: 'static + io::Writ
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.drain_buf_until_space(buf.len())?;
         
+        self.mark_data_buffered(buf.len());
         self.cmd_send.send(DoWriteAll(buf.to_vec())).unwrap();
         
         Ok(buf.len())

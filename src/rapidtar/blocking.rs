@@ -79,9 +79,9 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
     /// be unchanged.
     fn empty_block<'a>(&mut self) -> io::Result<()> {
         if self.block.len() >= self.blocking_factor {
-            self.inner.write_all(&self.block)?;
+            self.inner.write_all(&self.block[..self.blocking_factor])?;
             
-            let mut commit_length = self.block.len() as u64;
+            let mut commit_length = self.blocking_factor as u64;
             let mut first_uncommitted = 0;
 
             for zone in &mut self.uncommitted_data_zones {
@@ -93,7 +93,7 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
                 }
             }
 
-            self.uncommitted_data_zones = self.uncommitted_data_zones.split_off(first_uncommitted);
+            self.uncommitted_data_zones.drain(..first_uncommitted);
 
             //This is actually safe, because this always acts to shrink
             //the array, failing to drop values properly is safe (though
