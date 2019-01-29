@@ -3,6 +3,7 @@ use rapidtar::tape;
 use rapidtar::tape::windows::WindowsTapeDevice;
 use rapidtar::blocking::BlockingWriter;
 use rapidtar::concurrentbuf::ConcurrentWriteBuffer;
+use rapidtar::tuning::Configuration;
 
 pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 
@@ -14,7 +15,7 @@ pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 /// 
 /// This is the Windows version of the function. It supports writes to files
 /// and tape devices.
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<usize>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone {
     let mut is_tape = false;
     
     {
@@ -41,11 +42,7 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<us
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
                 Ok(mut tape) => {
-                    if let Some(blocksize) = blocking_factor {
-                        return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, 1024 * 1024 * 1024), blocksize)));
-                    } else {
-                        return Ok(Box::new(ConcurrentWriteBuffer::new(tape, 1024 * 1024 * 1024)));
-                    }
+                    return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)));
                 },
                 Err(e) => {
                     match e.raw_os_error() {
@@ -68,7 +65,7 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<us
     } else {
         let file = fs::File::create(outfile.as_ref())?;
         
-        Ok(Box::new(file))
+        Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
     }
 }
 
