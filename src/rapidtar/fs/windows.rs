@@ -42,9 +42,9 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, blocking_factor: Option<us
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
                 Ok(mut tape) => {
                     if let Some(blocksize) = blocking_factor {
-                        return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, 100 * 1024 * 1024), blocksize)));
+                        return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, 1024 * 1024 * 1024), blocksize)));
                     } else {
-                        return Ok(Box::new(ConcurrentWriteBuffer::new(tape, 100 * 1024 * 1024)));
+                        return Ok(Box::new(ConcurrentWriteBuffer::new(tape, 1024 * 1024 * 1024)));
                     }
                 },
                 Err(e) => {
