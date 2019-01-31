@@ -13,7 +13,7 @@ mod rapidtar;
 use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
 use std::{io, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rapidtar::{tar, traverse, tuning};
+use rapidtar::{tar, traverse, tuning, units};
 use rapidtar::fs::open_sink;
 
 use std::io::Write;
@@ -38,6 +38,7 @@ fn main() -> io::Result<()> {
     let mut traversal_list : Vec<String> = Vec::new();
     let mut operation = TarOperation::Create;
     let mut verbose = false;
+    let mut serial_buffer_limit = units::DataSize::from(0);
     
     {
         let mut ap = ArgumentParser::new();
@@ -57,11 +58,13 @@ fn main() -> io::Result<()> {
         ap.refer(&mut tarconfig.channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut tarconfig.parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
         ap.refer(&mut tarconfig.blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
-        ap.refer(&mut tarconfig.serial_buffer_limit).add_option(&["--serial_buffer_limit"], Store, "How many bytes to buffer on the tarball side of the operation");
+        ap.refer(&mut serial_buffer_limit).add_option(&["--serial_buffer_limit"], Store, "How many bytes to buffer on the tarball side of the operation");
         ap.refer(&mut traversal_list).add_argument("file", Collect, "The files to archive");
         
         ap.parse_args_or_exit();
     }
+    
+    tarconfig.serial_buffer_limit = serial_buffer_limit.into_inner();
     
     match operation {
         TarOperation::Create => {
