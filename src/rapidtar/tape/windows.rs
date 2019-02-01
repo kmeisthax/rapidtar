@@ -3,7 +3,7 @@ use std::os::windows::ffi::OsStrExt;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
-use winapi::shared::winerror::NO_ERROR;
+use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA};
 use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
@@ -64,7 +64,18 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
         if unsafe { fileapi::WriteFile(self.tape_device, buf.as_ptr() as LPCVOID, buf.len() as DWORD, &mut write_count, ptr::null_mut()) } == TRUE as BOOL {
             Ok(write_count as usize)
         } else {
-            Err(io::Error::last_os_error())
+            let err = io::Error::last_os_error();
+            
+            match err.raw_os_error() {
+                Some(ecode) => {
+                    if ecode == ERROR_END_OF_MEDIA as i32 {
+                        return Ok(0);
+                    }
+                },
+                _ => {}
+            }
+            
+            return Err(err);
         }
     }
     
