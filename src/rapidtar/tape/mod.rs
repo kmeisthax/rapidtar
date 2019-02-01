@@ -18,9 +18,9 @@ pub trait TapeDevice : io::Write {
     /// 
     /// This function operates similarly to `seek`, but operates in units of
     /// setmarks instead. A setmark is the tape marking that divides sets of
-    /// blocks within a file. Not many tape formats support setmarks, so you
-    /// must first verify (currently, through out-of-bounds means) if your tape
-    /// can seek in units of setmarks.
+    /// files. Not many tape formats support setmarks, so you must first verify
+    /// (currently, through out-of-bounds means) if your tape can seek in units
+    /// of setmarks.
     /// 
     /// All seek operations are relative to the current partition, if the tape
     /// has partitions.
