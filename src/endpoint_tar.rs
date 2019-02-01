@@ -39,7 +39,7 @@ fn main() -> io::Result<()> {
     let mut operation = TarOperation::Create;
     let mut verbose = false;
     let mut totals = false;
-    let mut serial_buffer_limit = units::DataSize::from(0);
+    let mut serial_buffer_limit = units::DataSize::from(1024*1024*1024);
     
     {
         let mut ap = ArgumentParser::new();
