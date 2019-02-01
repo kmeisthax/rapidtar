@@ -1,5 +1,3 @@
-//! Code relating to user-input units and conversions therein.
-
 use std::fmt;
 use std::result::Result;
 use std::str::FromStr;
@@ -103,21 +101,26 @@ impl<I> FromStr for DataSize<I> where I: FromStr + Mul + From<usize> + From<<I a
     }
 }
 
-impl<I> Display for DataSize<I> where I: Clone + Display + Div + From<u64> + From<<I as Div>::Output> + ToPrimitive {
+impl<I> Display for DataSize<I> where I: Clone + Display + Div + NumCast + ToPrimitive {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let innerf32 : f32 = NumCast::from(self.inner.clone()).ok_or(fmt::Error::default())?;
+        let innerf32 : f64 = NumCast::from(self.inner.clone()).ok_or(fmt::Error::default())?;
         let mag = innerf32.log(2.0);
+        let mut factor : f64 = 1.0;
         
-        if (mag > 40.0) {
-            write!(f, "{}TB", I::from(self.inner.clone() / I::from((1024 * 1024 * 1024 * 1024) as u64)))?;
-        } else if (mag > 30.0) {
-            write!(f, "{}GB", I::from(self.inner.clone() / I::from((1024 * 1024 * 1024) as u64)))?;
-        } else if (mag > 20.0) {
-            write!(f, "{}MB", I::from(self.inner.clone() / I::from((1024 * 1024) as u64)))?;
-        } else if (mag > 10.0) {
-            write!(f, "{}KB", I::from(self.inner.clone() / I::from(1024 as u64)))?;
+        if mag > 40.0 {
+            factor = 1024.0 * 1024.0 * 1024.0 * 1024.0;
+            write!(f, "{:.2}TB", innerf32 / factor)?;
+        } else if mag > 30.0 {
+            factor = 1024.0 * 1024.0 * 1024.0;
+            write!(f, "{:.2}GB", innerf32 / factor)?;
+        } else if mag > 20.0 {
+            factor = 1024.0 * 1024.0;
+            write!(f, "{:.2}MB", innerf32 / factor)?;
+        } else if mag > 10.0 {
+            factor = 1024.0;
+            write!(f, "{:.2}KB", innerf32 / factor)?;
         } else {
-            write!(f, "{}B", self.inner.clone())?;
+            write!(f, "{:.2}B", innerf32)?;
         }
         
         Ok(())

@@ -38,6 +38,7 @@ fn main() -> io::Result<()> {
     let mut traversal_list : Vec<String> = Vec::new();
     let mut operation = TarOperation::Create;
     let mut verbose = false;
+    let mut totals = false;
     let mut serial_buffer_limit = units::DataSize::from(0);
     
     {
@@ -55,6 +56,7 @@ fn main() -> io::Result<()> {
         ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
         ap.refer(&mut basepath).add_option(&["-C", "--directory"], Store, "The base path of the archival operation. Defaults to current working directory.");
+        ap.refer(&mut totals).add_option(&["--totals"], StoreTrue, "Print performance statistics after the operation has completed.");
         ap.refer(&mut tarconfig.channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut tarconfig.parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
         ap.refer(&mut tarconfig.blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
@@ -116,8 +118,13 @@ fn main() -> io::Result<()> {
             tarball.flush().unwrap();
 
             let write_time = start_instant.elapsed();
-
-            eprintln!("Done! Wrote {} in {} seconds", tarball_size, write_time.as_secs());
+            let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
+            let rate = units::DataSize::from(tarball_size.clone().into_inner() as f64 / float_secs);
+            let displayable_time = units::HRDuration::from(write_time);
+            
+            if (totals) {
+                eprintln!("Wrote {} in {} ({}/s)", tarball_size, displayable_time, rate);
+            }
 
             Ok(())
         },
