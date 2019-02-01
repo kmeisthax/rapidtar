@@ -97,6 +97,7 @@ fn main() -> io::Result<()> {
             drop(sender); //Kill the original sender, else the whole thread network deadlocks.
 
             let mut tarball_size = units::DataSize::from(0);
+            let mut last_error = None;
 
             while let Ok(entry) = reciever.recv() {
                 if verbose {
@@ -110,19 +111,31 @@ fn main() -> io::Result<()> {
                     Ok(size) => {
                         tarball_size += units::DataSize::from(size);
                     },
-                    Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
+                    Err(e) => {
+                        eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e);
+                        last_error = Some(e);
+                        break;
+                    }
                 }
             }
-
-            tarball.write_all(&vec![0; 1024]).unwrap();
-            tarball.flush().unwrap();
-
-            let write_time = start_instant.elapsed();
-            let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
-            let rate = units::DataSize::from(tarball_size.clone().into_inner() as f64 / float_secs);
-            let displayable_time = units::HRDuration::from(write_time);
+            
+            match last_error {
+                None => {
+                    tarball.write_all(&vec![0; 1024])?;
+                    tarball.flush()?;
+                },
+                Some(ref e) if e.kind() == io::ErrorKind::WriteZero => {
+                    //TODO: Media replacement and stream recovery flow
+                },
+                _ => {}
+            }
             
             if (totals) {
+                let write_time = start_instant.elapsed();
+                let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
+                let rate = units::DataSize::from(tarball_size.clone().into_inner() as f64 / float_secs);
+                let displayable_time = units::HRDuration::from(write_time);
+                
                 eprintln!("Wrote {} in {} ({}/s)", tarball_size, displayable_time, rate);
             }
 
