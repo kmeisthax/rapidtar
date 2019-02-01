@@ -94,7 +94,7 @@ fn main() -> io::Result<()> {
 
             drop(sender); //Kill the original sender, else the whole thread network deadlocks.
 
-            let mut tarball_size = 0;
+            let mut tarball_size = units::DataSize::from(0);
 
             while let Ok(entry) = reciever.recv() {
                 if verbose {
@@ -106,7 +106,7 @@ fn main() -> io::Result<()> {
 
                 match tar::serialize(&entry, tarball.as_mut()) {
                     Ok(size) => {
-                        tarball_size += size;
+                        tarball_size += units::DataSize::from(size);
                     },
                     Err(e) => eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e)
                 }
@@ -117,7 +117,7 @@ fn main() -> io::Result<()> {
 
             let write_time = start_instant.elapsed();
 
-            eprintln!("Done! Wrote {} bytes in {} seconds", tarball_size, write_time.as_secs());
+            eprintln!("Done! Wrote {} in {} seconds", tarball_size, write_time.as_secs());
 
             Ok(())
         },
