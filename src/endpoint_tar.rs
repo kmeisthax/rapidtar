@@ -100,6 +100,7 @@ fn main() -> io::Result<()> {
 
             let mut tarball_size = units::DataSize::from(0);
             let mut last_error = None;
+            let mut last_error_entry = None;
 
             while let Ok(entry) = reciever.recv() {
                 if verbose {
@@ -114,8 +115,8 @@ fn main() -> io::Result<()> {
                         tarball_size += units::DataSize::from(size);
                     },
                     Err(e) => {
-                        eprintln!("Error archiving file {:?}: {:?}", entry.original_path, e);
                         last_error = Some(e);
+                        last_error_entry = Some(entry);
                         break;
                     }
                 }
@@ -128,8 +129,9 @@ fn main() -> io::Result<()> {
                 },
                 Some(ref e) if e.kind() == io::ErrorKind::WriteZero => {
                     //TODO: Media replacement and stream recovery flow
+                    eprintln!("Media ran out of space archiving file {:?}, cannot continue", last_error_entry.unwrap().original_path)
                 },
-                _ => {}
+                Some(e) => eprintln!("Error archiving file {:?}: {:?}", last_error_entry.unwrap().original_path, e)
             }
             
             if (totals) {
