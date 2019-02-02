@@ -30,8 +30,8 @@ impl Display for HRDuration {
         let days_remain_secs = total_secs - (days * 60 * 60 * 24);
         let hours = days_remain_secs / (60 * 60);
         let hours_remain_secs = days_remain_secs - (hours * 60 * 60);
-        let minutes = hours_remain_secs / (60 * 60);
-        let seconds = hours_remain_secs - (minutes * 60 * 60);
+        let minutes = hours_remain_secs / (60);
+        let seconds = hours_remain_secs - (minutes * 60);
         
         let millis = remain_nanos / (1000 * 1000);
         let millis_remain_nanos = remain_nanos - (millis * 1000 * 1000);
@@ -67,5 +67,35 @@ impl Display for HRDuration {
         }
         
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use rapidtar::units::time::HRDuration;
+    use std::time::Duration;
+    
+    #[test]
+    fn time_hours() {
+        let my_time = Duration::new(12*60*60 + 30*60 + 14, 0);
+        let fmtd = format!("{}", HRDuration::from(my_time));
+        
+        assert_eq!(fmtd, "12h30m14s");
+    }
+    
+    #[test]
+    fn time_days() {
+        let my_time = Duration::new(14*24*60*60 + 12*60*60 + 30*60 + 14, 0);
+        let fmtd = format!("{}", HRDuration::from(my_time));
+        
+        assert_eq!(fmtd, "14d12h30m14s");
+    }
+    
+    #[test]
+    fn time_nanos() {
+        let my_time = Duration::new(30*60 + 14, 123);
+        let fmtd = format!("{}", HRDuration::from(my_time));
+        
+        assert_eq!(fmtd, "30m14s123ns");
     }
 }
