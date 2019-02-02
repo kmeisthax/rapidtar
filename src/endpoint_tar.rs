@@ -79,7 +79,9 @@ fn main() -> io::Result<()> {
             let start_instant = time::Instant::now();
             let reciever : Receiver<tar::header::HeaderGenResult> = reciever;
             let mut tarball = open_sink(outfile, &tarconfig).unwrap();
-            let parallel_read_pool = rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit).build().unwrap();
+            let parallel_read_pool = rayon::ThreadPoolBuilder::new().num_threads(tarconfig.parallel_io_limit).thread_name(|i| {
+                format!("Preread Thread {}", i)
+            }).build().unwrap();
             
             env::set_current_dir(basepath).unwrap();
 
@@ -88,7 +90,7 @@ fn main() -> io::Result<()> {
 
                 parallel_read_pool.spawn(move || {
                     traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
-                        c.send(tar::header::headergen(iopath, tarpath, metadata)?).unwrap(); //Propagate io::Errors, but panic if the channel dies
+                        c.send(tar::header::headergen(iopath, tarpath, metadata)?)?;
                         Ok(())
                     }, child_sender, None).unwrap();
                 });
