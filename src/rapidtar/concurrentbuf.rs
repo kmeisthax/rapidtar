@@ -40,26 +40,36 @@ fn command_task_write<T, P>(inner_mtx: Arc<Mutex<T>>, cmd_recv: Receiver<Concurr
             match cmd {
                 DoRead(how_much) => {
                     //This is the *WRITER* version of the task, so just return nothing
-                    cmd_send.send(DidRead(Err(io::Error::new(io::ErrorKind::Other, "This is not a read buffer")))).unwrap();
+                    if let Err(_) = cmd_send.send(DidRead(Err(io::Error::new(io::ErrorKind::Other, "This is not a read buffer")))) {
+                        break;
+                    }
                 },
                 DoWriteAll(data) => {
-                    cmd_send.send(DidWriteAll(match inner.write_all(&data) {
+                    if let Err(_) = cmd_send.send(DidWriteAll(match inner.write_all(&data) {
                         Ok(_) => Ok(data.len()),
                         Err(e) => Err(e)
-                    })).unwrap();
+                    })) {
+                        break;
+                    }
                 },
                 DoFlush => {
-                    cmd_send.send(DidFlush(inner.flush())).unwrap();
+                    if let Err(_) = cmd_send.send(DidFlush(inner.flush())) {
+                        break;
+                    }
                 },
                 DoBeginDataZone(ident) => {
                     inner.begin_data_zone(ident);
                     
-                    cmd_send.send(DidBeginDataZone).unwrap();
+                    if let Err(_) = cmd_send.send(DidBeginDataZone) {
+                        break;
+                    }
                 },
                 DoEndDataZone => {
                     inner.end_data_zone();
                     
-                    cmd_send.send(DidEndDataZone).unwrap();
+                    if let Err(_) = cmd_send.send(DidEndDataZone) {
+                        break;
+                    }
                 },
                 Terminate => {
                     break;
@@ -68,7 +78,7 @@ fn command_task_write<T, P>(inner_mtx: Arc<Mutex<T>>, cmd_recv: Receiver<Concurr
         }
     }
     
-    cmd_send.send(Terminated).unwrap();
+    cmd_send.send(Terminated);
 }
 
 /// Write buffer that does all of it's buffered I/O concurrently.
@@ -109,7 +119,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
         let self_inner_mtx = Arc::new(Mutex::new(inner));
         let cmd_inner_mtx = self_inner_mtx.clone();
         
-        thread::spawn(move || {
+        thread::Builder::new().name("Async Write Thread".into()).stack_size(64*1024).spawn(move || {
             command_task_write(cmd_inner_mtx, cmd_recv, resp_send)
         });
         
@@ -252,6 +262,12 @@ impl<T, P> RecoverableWrite<P> for ConcurrentWriteBuffer<T, P> where T: 'static 
         }
 
         inner_ucw
+    }
+}
+
+impl<T, P> Drop for ConcurrentWriteBuffer<T, P> where T: io::Write + Send, P: Send + Clone {
+    fn drop(&mut self) {
+        self.cmd_send.send(Terminate);
     }
 }
 
