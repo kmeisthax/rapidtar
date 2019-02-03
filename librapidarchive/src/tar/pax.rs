@@ -1,9 +1,9 @@
 use std::{io, path, time, ffi};
-use rapidtar::tar::ustar;
-use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string};
-use rapidtar::tar::gnu::{format_gnu_numeral, format_gnu_time};
-use rapidtar::tar::header::{TarHeader, TarFileType};
-use rapidtar::tar::canonicalized_tar_path;
+use crate::tar::ustar;
+use crate::tar::ustar::{format_tar_numeral, format_tar_string};
+use crate::tar::gnu::{format_gnu_numeral, format_gnu_time};
+use crate::tar::header::{TarHeader, TarFileType};
+use crate::tar::canonicalized_tar_path;
 
 /// Format a key-value pair in pax format.
 /// 
@@ -321,8 +321,8 @@ pub fn checksum_header(header: &mut Vec<u8>) {
 #[cfg(test)]
 mod tests {
     use std::{path};
-    use rapidtar::tar::pax::{format_pax_attribute, format_pax_legacy_filename, canonicalized_tar_path};
-    use rapidtar::tar::header::TarFileType;
+    use crate::tar::pax::{format_pax_attribute, format_pax_legacy_filename, canonicalized_tar_path};
+    use crate::tar::header::TarFileType;
     
     #[test]
     fn pax_attribute() {

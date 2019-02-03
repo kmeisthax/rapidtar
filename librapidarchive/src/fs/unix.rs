@@ -1,8 +1,8 @@
 use std::{io, fs};
 use std::os::unix::prelude::*;
-use rapidtar::tar;
+use crate::tar;
 
-pub use rapidtar::fs::portable::{ArchivalSink, open_sink, open_tape};
+pub use crate::fs::portable::{ArchivalSink, open_sink, open_tape};
 
 /// Given a directory entry, produce valid Unix mode bits for it.
 /// 

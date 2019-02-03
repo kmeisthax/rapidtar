@@ -2,8 +2,8 @@ use std::{io, thread};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver};
-use rapidtar::fs::ArchivalSink;
-use rapidtar::spanning::{DataZone, RecoverableWrite};
+use crate::fs::ArchivalSink;
+use crate::spanning::{DataZone, RecoverableWrite};
 
 enum ConcurrentCommand<I> where I: Send + Clone {
     DoRead(u64),

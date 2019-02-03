@@ -12,10 +12,10 @@ pub mod windows;
 pub mod unix;
 
 #[cfg(unix)]
-pub use rapidtar::fs::unix::*;
+pub use crate::fs::unix::*;
 
 #[cfg(windows)]
-pub use rapidtar::fs::windows::*;
+pub use crate::fs::windows::*;
 
 #[cfg(all(not(unix), not(windows)))]
-pub use rapidtar::fs::portable::*;
+pub use crate::fs::portable::*;

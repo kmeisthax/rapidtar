@@ -16,7 +16,7 @@ pub mod recovery;
 
 use std::{io, path, fs};
 use std::io::{Seek};
-use rapidtar::fs::{ArchivalSink};
+use crate::fs::{ArchivalSink};
 
 /// Given a filesystem path and the file's type, canonicalize the path for tar
 /// archival.

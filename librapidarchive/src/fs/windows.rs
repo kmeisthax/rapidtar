@@ -1,11 +1,11 @@
 use std::{io, fs, ffi, path, thread, time};
-use rapidtar::tape;
-use rapidtar::tape::windows::WindowsTapeDevice;
-use rapidtar::blocking::BlockingWriter;
-use rapidtar::concurrentbuf::ConcurrentWriteBuffer;
-use rapidtar::tuning::Configuration;
+use crate::tape;
+use crate::tape::windows::WindowsTapeDevice;
+use crate::blocking::BlockingWriter;
+use crate::concurrentbuf::ConcurrentWriteBuffer;
+use crate::tuning::Configuration;
 
-pub use rapidtar::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
+pub use crate::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 
 /// Open a sink object for writing an archive (aka "tape").
 /// 

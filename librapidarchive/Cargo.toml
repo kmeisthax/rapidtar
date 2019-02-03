@@ -1,0 +1,27 @@
+[package]
+name = "librapidarchive"
+description = "Library for generating archive files of various kinds"
+version = "0.2.0"
+authors = ["David Wendt"]
+repository = "https://github.com/kmeisthax/rapidtar"
+
+categories = ["filesystem"]
+keywords = ["tar", "archival", "tape"]
+
+license = "GPL-3.0-or-later"
+
+[dependencies]
+rayon = "1.0.3"
+pad = "0.1" #omfg wtf am I doing. fucking left-pad?!
+num = "0.2.0"
+num-traits = "0.2.6"
+
+[dev-dependencies]
+rand = "0.6.4"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
+
+[lib]
+name="librapidarchive"
+path="src/lib.rs"

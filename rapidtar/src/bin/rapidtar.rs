@@ -1,20 +1,12 @@
 extern crate rayon;
-extern crate pad;
-extern crate pathdiff;
 extern crate argparse;
-extern crate num;
-extern crate num_traits;
-
-#[cfg(windows)]
-extern crate winapi;
-
-mod rapidtar;
+extern crate librapidarchive;
 
 use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
 use std::{io, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use rapidtar::{tar, traverse, tuning, units};
-use rapidtar::fs::open_sink;
+use librapidarchive::{tar, traverse, tuning, units};
+use librapidarchive::fs::open_sink;
 
 use std::io::Write;
 

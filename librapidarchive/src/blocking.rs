@@ -1,8 +1,8 @@
 use std::io;
 use std::io::Write;
 
-use rapidtar::spanning::{RecoverableWrite, DataZone};
-use rapidtar::fs::ArchivalSink;
+use crate::spanning::{RecoverableWrite, DataZone};
+use crate::fs::ArchivalSink;
 
 /// Write implementation that ensures all data written to it is passed along to
 /// it's interior writer in identically-sized buffers of 512 * factor bytes.
@@ -209,8 +209,8 @@ impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone, W: RecoverableWr
 #[cfg(test)]
 mod tests {
     use std::io::{Write, Cursor};
-    use rapidtar::blocking::BlockingWriter;
-    use rapidtar::spanning::{UnbufferedWriter, RecoverableWrite};
+    use crate::blocking::BlockingWriter;
+    use crate::spanning::{UnbufferedWriter, RecoverableWrite};
     
     #[test]
     fn blocking_factor_1_block_passthrough() {

@@ -72,7 +72,7 @@ pub fn format_gnu_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::gnu::{format_gnu_numeral};
+    use crate::tar::gnu::{format_gnu_numeral};
     
     #[test]
     fn format_gnu_numeral_8() {

@@ -1,6 +1,6 @@
 use std::{io, fs, path, ffi};
-use rapidtar::{tar, tape, spanning};
-use rapidtar::tuning::Configuration;
+use crate::{tar, tape, spanning};
+use crate::tuning::Configuration;
 
 /// Supertrait that represents all the things a good archive sink needs to be.
 /// 

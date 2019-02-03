@@ -1,8 +1,8 @@
 use std::{path, time, io, cmp, fs};
 use std::io::Read;
-use rapidtar::fs::{get_file_type, get_unix_mode};
-use rapidtar::normalize;
-use rapidtar::tar::pax;
+use crate::fs::{get_file_type, get_unix_mode};
+use crate::normalize;
+use crate::tar::pax;
 
 /// An abstract representation of the TAR typeflag field.
 ///

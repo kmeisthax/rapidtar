@@ -1,0 +1,19 @@
+[package]
+name = "rapidtar"
+description = "Multithreaded file archival utility"
+version = "0.2.0"
+authors = ["David Wendt"]
+repository = "https://github.com/kmeisthax/rapidtar"
+
+categories = ["filesystem"]
+keywords = ["tar", "archival", "tape"]
+
+license = "GPL-3.0-or-later"
+
+[dependencies]
+rayon = "1.0.3"
+argparse = "0.2.2"
+librapidarchive = { path = "../librapidarchive" }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }

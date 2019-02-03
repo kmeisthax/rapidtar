@@ -1,8 +1,8 @@
 use std::{io, path, time, fmt};
 use pad::{PadStr, Alignment};
-use rapidtar::tar::pax;
-use rapidtar::tar::header::{TarHeader, TarFileType};
-use rapidtar::tar::canonicalized_tar_path;
+use crate::tar::pax;
+use crate::tar::header::{TarHeader, TarFileType};
+use crate::tar::canonicalized_tar_path;
 use num;
 use num_traits;
 
@@ -145,8 +145,8 @@ pub fn checksum_header(header: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
-    use rapidtar::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
-    use rapidtar::tar::header::TarFileType;
+    use crate::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
+    use crate::tar::header::TarFileType;
     use std::{io, path};
     
     #[test]

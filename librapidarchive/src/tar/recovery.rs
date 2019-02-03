@@ -1,5 +1,5 @@
 use std::path;
-use rapidtar::tar::header::{TarHeader, HeaderGenResult};
+use crate::tar::header::{TarHeader, HeaderGenResult};
 
 /// Information on how to recover from a failed serialization.
 #[derive(Clone)]

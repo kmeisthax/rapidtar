@@ -72,7 +72,7 @@ impl Display for HRDuration {
 
 #[cfg(test)]
 mod test {
-    use rapidtar::units::time::HRDuration;
+    use crate::units::time::HRDuration;
     use std::time::Duration;
     
     #[test]

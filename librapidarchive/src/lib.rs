@@ -1,3 +1,11 @@
+extern crate rayon;
+extern crate pad;
+extern crate num;
+extern crate num_traits;
+
+#[cfg(windows)]
+extern crate winapi;
+
 /// tar archive format definitions and serializers.
 pub mod tar;
 

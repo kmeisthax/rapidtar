@@ -1,4 +1,4 @@
-use std::{io, ptr, fmt, ffi};
+use std::{io, ptr, fmt, ffi, mem};
 use std::os::windows::ffi::OsStrExt;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
@@ -8,9 +8,9 @@ use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_E
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
-use rapidtar::tape::TapeDevice;
-use rapidtar::spanning::RecoverableWrite;
-use rapidtar::fs::ArchivalSink;
+use crate::tape::TapeDevice;
+use crate::spanning::RecoverableWrite;
+use crate::fs::ArchivalSink;
 
 pub struct WindowsTapeDevice<P = u64> where P: Sized {
     tape_device: HANDLE,
@@ -33,7 +33,11 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     /// Open a tape device by it's NT device path.
     pub fn open_device(nt_device_path : &ffi::OsStr) -> io::Result<WindowsTapeDevice<P>> {
         let nt_device_path_ffi : Vec<WCHAR> = nt_device_path.encode_wide().collect();
-        let nt_device = unsafe { fileapi::CreateFileW(nt_device_path_ffi.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut()) };
+        let nt_device_ptr = nt_device_path_ffi.as_ptr();
+        
+        mem::forget(nt_device_ptr);
+        
+        let nt_device = unsafe { fileapi::CreateFileW(nt_device_ptr, GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut()) };
         
         if nt_device == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
