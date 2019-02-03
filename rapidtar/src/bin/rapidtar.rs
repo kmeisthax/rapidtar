@@ -82,7 +82,7 @@ fn main() -> io::Result<()> {
 
                 parallel_read_pool.spawn(move || {
                     traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
-                        c.send(tar::header::headergen(iopath, tarpath, metadata)?)?;
+                        c.send(tar::header::headergen(iopath, tarpath, metadata, tar::header::TarFormat::POSIX)?)?;
                         Ok(())
                     }, child_sender, None).unwrap();
                 });

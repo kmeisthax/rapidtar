@@ -2,7 +2,13 @@ use std::{path, time, io, cmp, fs};
 use std::io::Read;
 use crate::fs::{get_file_type, get_unix_mode};
 use crate::normalize;
-use crate::tar::pax;
+use crate::tar::{ustar, pax};
+
+#[derive(Copy, Clone)]
+pub enum TarFormat {
+    USTAR,
+    POSIX
+}
 
 /// An abstract representation of the TAR typeflag field.
 ///
@@ -98,7 +104,7 @@ pub struct HeaderGenResult {
 /// fails or the item is not a file then the file_prefix field will be None.
 ///
 /// TODO: Make headergen read-ahead caching maximum configurable.
-pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<HeaderGenResult> {
+pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata, format: TarFormat) -> io::Result<HeaderGenResult> {
     let tarheader = TarHeader {
         path: Box::new(normalize::normalize(&archival_path)),
         unix_mode: get_unix_mode(entry_metadata)?,
@@ -125,8 +131,15 @@ pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_meta
         recovery_seek_offset: None
     };
 
-    let mut concrete_tarheader = pax::pax_header(&tarheader)?;
-    pax::checksum_header(&mut concrete_tarheader);
+    let mut concrete_tarheader = match format {
+        TarFormat::USTAR => ustar::ustar_header(&tarheader)?,
+        TarFormat::POSIX => pax::pax_header(&tarheader)?
+    };
+
+    match format {
+        TarFormat::USTAR => pax::checksum_header(&mut concrete_tarheader),
+        TarFormat::POSIX => pax::checksum_header(&mut concrete_tarheader)
+    }
 
     //TODO: This should be unnecessary as we are usually handed data from traverse
     let canonical_path = fs::canonicalize(entry_path).unwrap();
