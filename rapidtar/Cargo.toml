@@ -10,6 +10,8 @@ keywords = ["tar", "archival", "tape"]
 
 license = "GPL-3.0-or-later"
 
+edition = '2018'
+
 [dependencies]
 rayon = "1.0.3"
 argparse = "0.2.2"

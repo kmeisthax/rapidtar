@@ -10,6 +10,8 @@ keywords = ["tar", "archival", "tape"]
 
 license = "GPL-3.0-or-later"
 
+edition = '2018'
+
 [dependencies]
 rayon = "1.0.3"
 pad = "0.1" #omfg wtf am I doing. fucking left-pad?!
