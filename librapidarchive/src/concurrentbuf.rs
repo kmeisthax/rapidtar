@@ -1,11 +1,11 @@
 use std::{io, thread};
-use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use crate::fs::ArchivalSink;
 use crate::spanning::{DataZone, RecoverableWrite};
 
 enum ConcurrentCommand<I> where I: Send + Clone {
+    #[allow(dead_code)]
     DoRead(u64),
     DoWriteAll(Vec<u8>),
     DoFlush,
@@ -32,13 +32,14 @@ use self::ConcurrentResponse::*;
 /// This is the version of the command task designed to handle instances of
 /// [`io::Write`]. Due to Rust specialization not being ready yet, you can only
 /// prebuffer an [`io::Read`] *or* an [`io::Write`], but not both.
+#[allow(unused_must_use)]
 fn command_task_write<T, P>(inner_mtx: Arc<Mutex<T>>, cmd_recv: Receiver<ConcurrentCommand<P>>, cmd_send: Sender<ConcurrentResponse>) where T: io::Write + Send + RecoverableWrite<P>, P: Send + Clone {
     while let Ok(cmd) = cmd_recv.recv() {
         {
             let mut inner = inner_mtx.lock().unwrap();
             
             match cmd {
-                DoRead(how_much) => {
+                DoRead(_) => {
                     //This is the *WRITER* version of the task, so just return nothing
                     if let Err(_) = cmd_send.send(DidRead(Err(io::Error::new(io::ErrorKind::Other, "This is not a read buffer")))) {
                         break;
@@ -121,7 +122,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
         
         thread::Builder::new().name("Async Write Thread".into()).stack_size(64*1024).spawn(move || {
             command_task_write(cmd_inner_mtx, cmd_recv, resp_send)
-        });
+        }).unwrap();
         
         ConcurrentWriteBuffer {
             cmd_send: cmd_send,
@@ -184,7 +185,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
                 Ok(DidWriteAll(Err(e))) => return Err(e),
                 Ok(DidRead(Err(e))) => return Err(e), //this shouldn't happen but w/e
                 Ok(DidFlush(Err(e))) => return Err(e),
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Buffer thread unexpectedly terminated")),
+                Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Buffer thread unexpectedly terminated")),
                 _ => continue
             }
         }
@@ -205,12 +206,10 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
                 Ok(DidRead(Err(e))) => return Err(e), //this shouldn't happen but w/e
                 Ok(DidFlush(Ok(()))) => return Ok(()),
                 Ok(DidFlush(Err(e))) => return Err(e),
-                Err(e) => return Err(io::Error::new(io::ErrorKind::Other, "Buffer thread unexpectedly terminated")),
+                Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "Buffer thread unexpectedly terminated")),
                 _ => continue
             }
         }
-        
-        Ok(())
     }
 }
 
@@ -266,6 +265,7 @@ impl<T, P> RecoverableWrite<P> for ConcurrentWriteBuffer<T, P> where T: 'static 
 }
 
 impl<T, P> Drop for ConcurrentWriteBuffer<T, P> where T: io::Write + Send, P: Send + Clone {
+    #[allow(unused_must_use)]
     fn drop(&mut self) {
         self.cmd_send.send(Terminate);
     }

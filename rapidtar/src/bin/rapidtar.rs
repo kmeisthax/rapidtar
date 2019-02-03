@@ -126,7 +126,7 @@ fn main() -> io::Result<()> {
                 Some(e) => eprintln!("Error archiving file {:?}: {:?}", last_error_entry.unwrap().original_path, e)
             }
             
-            if (totals) {
+            if totals {
                 let write_time = start_instant.elapsed();
                 let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
                 let rate = units::DataSize::from(tarball_size.clone().into_inner() as f64 / float_secs);

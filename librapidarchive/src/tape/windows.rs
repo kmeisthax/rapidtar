@@ -1,5 +1,6 @@
 use std::{io, ptr, fmt, ffi, mem};
 use std::os::windows::ffi::OsStrExt;
+use std::marker::PhantomData;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
@@ -14,7 +15,7 @@ use crate::fs::ArchivalSink;
 
 pub struct WindowsTapeDevice<P = u64> where P: Sized {
     tape_device: HANDLE,
-    last_ident: Option<P>
+    last_ident: PhantomData<P>
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -56,7 +57,7 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     pub unsafe fn from_device_handle(nt_device : HANDLE) -> WindowsTapeDevice<P> {
         WindowsTapeDevice {
             tape_device: nt_device,
-            last_ident: None
+            last_ident: PhantomData
         }
     }
 }
@@ -176,7 +177,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
     
     fn seek_partition(&mut self, id: u32) -> io::Result<()> {
-        let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
+        let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
         
         if error != NO_ERROR {
             return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error changing partitions: {}", error)));

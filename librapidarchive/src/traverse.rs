@@ -43,7 +43,7 @@ impl From<io::Error> for TraversalError {
 }
 
 impl<T> From<SendError<T>> for TraversalError {
-    fn from(error: SendError<T>) -> Self {
+    fn from(_error: SendError<T>) -> Self {
         TraversalCancelled
     }
 }

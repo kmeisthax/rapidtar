@@ -105,7 +105,7 @@ impl<I> Display for DataSize<I> where I: Clone + Display + Div + NumCast + ToPri
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let innerf32 : f64 = NumCast::from(self.inner.clone()).ok_or(fmt::Error::default())?;
         let mag = innerf32.log(2.0);
-        let mut factor : f64 = 1.0;
+        let factor : f64;
         
         if mag > 40.0 {
             factor = 1024.0 * 1024.0 * 1024.0 * 1024.0;

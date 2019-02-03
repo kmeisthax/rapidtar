@@ -2,8 +2,7 @@ extern crate argparse;
 extern crate librapidarchive;
 
 use argparse::{ArgumentParser, Store};
-use std::{env, io, fs, path, thread, time};
-use librapidarchive::{tar, traverse, blocking};
+use std::{env, io};
 use librapidarchive::fs::open_tape;
 
 fn main() -> io::Result<()> {

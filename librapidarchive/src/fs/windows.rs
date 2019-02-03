@@ -41,7 +41,7 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
     if is_tape {
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
-                Ok(mut tape) => {
+                Ok(tape) => {
                     return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)));
                 },
                 Err(e) => {
@@ -79,11 +79,11 @@ pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeD
     //Windows does this fun thing where it pretends tape devices don't exist
     //sometimes, so we ignore up to 5 file/path not found errors before actually
     //forwarding one along
-    let mut notfound_count = 0;
+    let notfound_count = 0;
     
     loop {
         match WindowsTapeDevice::<u64>::open_device(&ffi::OsString::from(tapedev.clone())) {
-            Ok(mut tape) => {
+            Ok(tape) => {
                 return Ok(Box::new(tape));
             }
             Err(e) => {
