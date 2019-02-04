@@ -1,13 +1,26 @@
 use std::{path, time, io, cmp, fs};
 use std::io::Read;
+use std::str::FromStr;
 use crate::fs::{get_file_type, get_unix_mode};
 use crate::normalize;
 use crate::tar::{ustar, pax};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum TarFormat {
     USTAR,
     POSIX
+}
+
+impl FromStr for TarFormat {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.as_ref() {
+            "ustar" => Ok(TarFormat::USTAR),
+            "posix" => Ok(TarFormat::POSIX),
+            _ => Err(())
+        }
+    }
 }
 
 /// An abstract representation of the TAR typeflag field.
@@ -137,7 +150,7 @@ pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_meta
     };
 
     match format {
-        TarFormat::USTAR => pax::checksum_header(&mut concrete_tarheader),
+        TarFormat::USTAR => ustar::checksum_header(&mut concrete_tarheader),
         TarFormat::POSIX => pax::checksum_header(&mut concrete_tarheader)
     }
 

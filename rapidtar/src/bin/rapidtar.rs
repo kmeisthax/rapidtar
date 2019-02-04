@@ -32,6 +32,7 @@ fn main() -> io::Result<()> {
     let mut verbose = false;
     let mut totals = false;
     let mut serial_buffer_limit = units::DataSize::from(1024*1024*1024);
+    let mut format = tar::header::TarFormat::POSIX;
     
     {
         let mut ap = ArgumentParser::new();
@@ -48,6 +49,7 @@ fn main() -> io::Result<()> {
         ap.refer(&mut verbose).add_option(&["-v"], StoreTrue, "Verbose mode");
         ap.refer(&mut outfile).add_option(&["-f"], Store, "The file to write the archive to. Allowed to be a tape device.");
         ap.refer(&mut basepath).add_option(&["-C", "--directory"], Store, "The base path of the archival operation. Defaults to current working directory.");
+        ap.refer(&mut format).add_option(&["--format"], Store, "The tar format to write or expect.");
         ap.refer(&mut totals).add_option(&["--totals"], StoreTrue, "Print performance statistics after the operation has completed.");
         ap.refer(&mut tarconfig.channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
         ap.refer(&mut tarconfig.parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
@@ -82,7 +84,7 @@ fn main() -> io::Result<()> {
 
                 parallel_read_pool.spawn(move || {
                     traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
-                        c.send(tar::header::headergen(iopath, tarpath, metadata, tar::header::TarFormat::POSIX)?)?;
+                        c.send(tar::header::headergen(iopath, tarpath, metadata, format)?)?;
                         Ok(())
                     }, child_sender, None).unwrap();
                 });
