@@ -1,9 +1,10 @@
 use std::{io, fs, cmp};
 use std::collections::VecDeque;
+use std::fmt::Debug;
 
 /// Represents data which has been committed to a write buffer and may fail to
 /// be written to the device.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DataZone<P> {
     pub ident: P,
     /// The total count of bytes written within this zone. Must equal the sum
@@ -61,7 +62,7 @@ impl<P> DataZone<P> {
         let overhang = length - self.uncommitted_length;
 
         self.uncommitted_length = 0;
-        self.committed_length += overhang;
+        self.committed_length += length - overhang;
 
         Some(overhang)
     }
@@ -109,7 +110,7 @@ pub struct DataZoneStream<P> {
     pending_zones: VecDeque<DataZone<P>>
 }
 
-impl<P> DataZoneStream<P> where P: Clone + PartialEq {
+impl<P> DataZoneStream<P> where P: Clone + PartialEq + Debug {
     pub fn new() -> DataZoneStream<P> {
         DataZoneStream{
             cur_zone: None,
@@ -175,48 +176,123 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq {
     /// standard `Vec`.
     /// 
     /// Callers may optionally provide another `Vec` to add zones onto. If
-    /// provided, this function will attempt to merge the last zone of the given
-    /// list, if it exists, with the first zone within this list. If they have
-    /// matching identifiers, then the zones will be merged.
+    /// provided, this function will attempt to merge zones that occur in the
+    /// same order between both lists. Data zones must be present in the same
+    /// order in this and the previous list if you want to be able to merge
+    /// them, otherwise they will be concatenated.
     fn uncommitted_writes(&self, chain: Option<Vec<DataZone<P>>>) -> Vec<DataZone<P>> {
-        let mut zonelist = chain.unwrap_or(Vec::new());
-        let mut skip_first_pending = false;
-        let mut skip_cur_zone = false;
+        return match chain {
+            Some(mut zonelist) => {
+                //Here's what we're looking for:
+                // 1. There is exactly one run of mergeable data zones that is
+                //    at least one entry long and occurs in the same order in
+                //    both lists
+                // 2. The mergeable run starts at the beginning in our list
+                // 3. The mergeable run ends the chained list
 
-        zonelist.reserve(self.pending_zones.len());
-        
-        if let Some(last_chain_zone) = zonelist.last_mut() {
-            if let Some(first_my_zone) = self.pending_zones.front() {
-                if let Some(merge_zone) = first_my_zone.merge_zone(last_chain_zone) {
-                    *last_chain_zone = merge_zone;
-                    skip_first_pending = true;
+                let first_ident = match self.pending_zones.front() {
+                    Some(datazone) => Some(datazone.ident.clone()),
+                    None => match &self.cur_zone {
+                        Some(curzone) => Some(curzone.ident.clone()),
+                        None => None
+                    }
+                };
+
+                if let Some(first_ident) = first_ident {
+                    let mut i = 0;
+                    let mut start_match = None;
+
+                    for zone in zonelist.iter() {
+                        if zone.ident == first_ident {
+                            start_match = Some(i);
+                            break;
+                        }
+                        
+                        i += 1;
+                    }
+
+                    if let Some(start_match) = start_match {
+                        let mut inner_iter = zonelist.iter_mut();
+                        for _ in 0..start_match {
+                            inner_iter.next();
+                        }
+
+                        //TODO: Could we optionally chain the cur_zone too?
+                        let my_iter = self.pending_zones.iter();
+                        let mut merge_count = 0;
+                        for (inner, mine) in inner_iter.zip(my_iter) {
+                            if let Some(new_inner) = inner.merge_zone(mine) {
+                                *inner = new_inner;
+                                merge_count += 1;
+                            }
+
+                            break;
+                        }
+
+                        if self.pending_zones.len() < merge_count {
+                            //We have unmerged zones, so we need to copy the rest
+                            let mut my_iter = self.pending_zones.iter();
+                            for _ in 0..merge_count {
+                                my_iter.next();
+                            }
+
+                            for unmergeable in my_iter {
+                                zonelist.push(unmergeable.clone());
+                            }
+
+                            if let Some(cur_zone) = &self.cur_zone {
+                                zonelist.push(cur_zone.clone());
+                            }
+                        } else {
+                            if let Some(cur_zone) = &self.cur_zone {
+                                if let Some(inner) = zonelist.get_mut(start_match + merge_count) {
+                                    if let Some(new_inner) = inner.merge_zone(&cur_zone) {
+                                        *inner = new_inner;
+                                    } else {
+                                        zonelist.push(cur_zone.clone());
+                                    }
+                                } else {
+                                    zonelist.push(cur_zone.clone());
+                                }
+                            }
+                        }
+                    } else {
+                        //No match, so just copy the data over sequentially.
+                        let (left_cz, right_cz) = self.pending_zones.as_slices();
+                        if left_cz.len() > 0 {
+                            zonelist.extend_from_slice(left_cz);
+                        }
+
+                        if right_cz.len() > 0 {
+                            zonelist.extend_from_slice(right_cz);
+                        }
+
+                        if let Some(cur_zone) = &self.cur_zone {
+                            zonelist.push(cur_zone.clone());
+                        }
+                    }
                 }
-            } else if let Some(first_my_zone) = &self.cur_zone {
-                if let Some(merge_zone) = first_my_zone.merge_zone(last_chain_zone) {
-                    *last_chain_zone = merge_zone;
-                    skip_cur_zone = true;
+
+                zonelist
+            },
+            None => {
+                let mut zonelist = Vec::new();
+                let (left_cz, right_cz) = self.pending_zones.as_slices();
+                if left_cz.len() > 0 {
+                    zonelist.extend_from_slice(left_cz);
                 }
+
+                if right_cz.len() > 0 {
+                    zonelist.extend_from_slice(right_cz);
+                }
+
+                if let Some(cur_zone) = &self.cur_zone {
+                    zonelist.push(cur_zone.clone());
+                }
+
+                zonelist
             }
         }
-
-        let (left_cz, right_cz) = self.pending_zones.as_slices();
-        if skip_first_pending && left_cz.len() > 1 {
-            zonelist.extend_from_slice(&left_cz[1..]);
-        } else if left_cz.len() > 0 {
-            zonelist.extend_from_slice(left_cz);
-        }
-
-        if right_cz.len() > 0 {
-            zonelist.extend_from_slice(right_cz);
-        }
-
-        if !skip_cur_zone {
-            if let Some(cur_zone) = &self.cur_zone {
-                zonelist.push(cur_zone.clone());
-            }
-        }
-
-        zonelist
     }
 }
 
@@ -310,4 +386,156 @@ impl <W: io::Write> io::Write for UnbufferedWriter<W> {
 }
 
 impl <W: io::Write, P> RecoverableWrite<P> for UnbufferedWriter<W> {
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DataZone, DataZoneStream};
+
+    #[test]
+    fn datazone_buffer() {
+        let mut dz = DataZone::new(0);
+
+        dz.write_buffered(1024);
+        let commit_result = dz.write_committed(768);
+
+        assert_eq!(dz.length, 1024);
+        assert_eq!(dz.committed_length, 768);
+        assert_eq!(dz.uncommitted_length, 256);
+        assert_eq!(commit_result, None);
+    }
+
+    #[test]
+    fn datazone_overhang() {
+        let mut dz = DataZone::new(0);
+
+        dz.write_buffered(1024);
+        let commit_result = dz.write_committed(1536);
+
+        assert_eq!(dz.length, 1024);
+        assert_eq!(dz.committed_length, 1024);
+        assert_eq!(dz.uncommitted_length, 0);
+        assert_eq!(commit_result, Some(512));
+    }
+
+    #[test]
+    fn datazone_stream() {
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(768);
+
+        let commit_result = dzs.write_committed(1024);
+        let uncommitted_zones = dzs.uncommitted_writes(None);
+
+        assert_eq!(commit_result, None);
+        assert_eq!(uncommitted_zones.len(), 2);
+        assert_eq!(uncommitted_zones[0].ident, 1);
+        assert_eq!(uncommitted_zones[0].length, 1024);
+        assert_eq!(uncommitted_zones[0].committed_length, 512);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones[1].ident, 2);
+        assert_eq!(uncommitted_zones[1].length, 768);
+        assert_eq!(uncommitted_zones[1].committed_length, 0);
+        assert_eq!(uncommitted_zones[1].uncommitted_length, 768);
+    }
+
+    #[test]
+    fn datazone_stream_2x() {
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(768);
+
+        let commit_result = dzs.write_committed(2048);
+        let uncommitted_zones = dzs.uncommitted_writes(None);
+
+        assert_eq!(commit_result, None);
+        assert_eq!(uncommitted_zones.len(), 1);
+        assert_eq!(uncommitted_zones[0].ident, 2);
+        assert_eq!(uncommitted_zones[0].length, 768);
+        assert_eq!(uncommitted_zones[0].committed_length, 512);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 256);
+    }
+
+    #[test]
+    fn datazone_stream_overhang() {
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(768);
+
+        let commit_result = dzs.write_committed(4096);
+        let uncommitted_zones = dzs.uncommitted_writes(None);
+
+        assert_eq!(commit_result, Some(1792));
+        assert_eq!(uncommitted_zones.len(), 1);
+        assert_eq!(uncommitted_zones[0].ident, 2);
+        assert_eq!(uncommitted_zones[0].length, 768);
+        assert_eq!(uncommitted_zones[0].committed_length, 768);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 0);
+    }
+
+    #[test]
+    fn datazone_stream_merge() {
+        let mut dzs_behind = DataZoneStream::new();
+
+        dzs_behind.begin_data_zone(0);
+        dzs_behind.write_buffered(512);
+        dzs_behind.begin_data_zone(1);
+        dzs_behind.write_buffered(1024);
+        dzs_behind.begin_data_zone(2);
+        dzs_behind.write_buffered(768);
+
+        let commit_result_behind = dzs_behind.write_committed(1024);
+
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(2048);
+
+        let commit_result = dzs.write_committed(4096);
+
+        let uncommitted_zones_behind = dzs_behind.uncommitted_writes(None);
+
+        assert_eq!(commit_result_behind, None);
+        assert_eq!(uncommitted_zones_behind.len(), 2);
+        assert_eq!(uncommitted_zones_behind[0].ident, 1);
+        assert_eq!(uncommitted_zones_behind[0].length, 1024);
+        assert_eq!(uncommitted_zones_behind[0].committed_length, 512);
+        assert_eq!(uncommitted_zones_behind[0].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones_behind[1].ident, 2);
+        assert_eq!(uncommitted_zones_behind[1].length, 768);
+        assert_eq!(uncommitted_zones_behind[1].committed_length, 0);
+        assert_eq!(uncommitted_zones_behind[1].uncommitted_length, 768);
+
+        let uncommitted_zones = dzs.uncommitted_writes(Some(uncommitted_zones_behind));
+        
+        assert_eq!(commit_result, Some(512));
+        assert_eq!(uncommitted_zones.len(), 2);
+        assert_eq!(uncommitted_zones[0].ident, 1);
+        assert_eq!(uncommitted_zones[0].length, 1024);
+        assert_eq!(uncommitted_zones[0].committed_length, 512);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones[1].ident, 2);
+        assert_eq!(uncommitted_zones[1].length, 2048);
+        assert_eq!(uncommitted_zones[1].committed_length, 0);
+        assert_eq!(uncommitted_zones[1].uncommitted_length, 2048);
+    }
 }
