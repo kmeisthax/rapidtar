@@ -1,27 +1,25 @@
 use std::io;
 use std::io::Write;
 
-use crate::spanning::{RecoverableWrite, DataZone};
+use crate::spanning::{RecoverableWrite, DataZone, DataZoneStream};
 use crate::fs::ArchivalSink;
 
 /// Write implementation that ensures all data written to it is passed along to
 /// it's interior writer in identically-sized buffers of 512 * factor bytes.
-pub struct BlockingWriter<W, P = u64> where P: Clone {
+pub struct BlockingWriter<W, P = u64> where P: Clone + PartialEq {
     blocking_factor: usize,
     inner: W,
     block: Vec<u8>,
-    current_data_zone: Option<DataZone<P>>,
-    uncommitted_data_zones: Vec<DataZone<P>>
+    datazone_stream: DataZoneStream<P>
 }
 
-impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
+impl<W: Write, P> BlockingWriter<W, P> where P: Clone + PartialEq {
     pub fn new(inner: W) -> BlockingWriter<W, P> {
         BlockingWriter {
             inner: inner,
             blocking_factor: 20 * 512,
             block: Vec::with_capacity(20 * 512),
-            current_data_zone: None,
-            uncommitted_data_zones: Vec::new()
+            datazone_stream: DataZoneStream::new()
         }
     }
     
@@ -30,8 +28,7 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
             inner: inner,
             blocking_factor: factor * 512,
             block: Vec::with_capacity(factor * 512),
-            current_data_zone: None,
-            uncommitted_data_zones: Vec::new()
+            datazone_stream: DataZoneStream::new()
         }
     }
     
@@ -53,18 +50,14 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
         if block_space >= buf.len() {
             self.block.extend(buf);
 
-            if let Some(ref mut zone) = self.current_data_zone {
-                zone.write_buffered(buf.len() as u64);
-            }
+            self.datazone_stream.write_buffered(buf.len() as u64);
 
             return None;
         }
-        
-        if let Some(ref mut zone) = self.current_data_zone {
-            zone.write_buffered(block_space as u64);
-        }
 
         self.block.extend(&buf[0..block_space]);
+        self.datazone_stream.write_buffered(block_space as u64);
+        
         Some(&buf[block_space..])
     }
     
@@ -80,20 +73,7 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
     fn empty_block<'a>(&mut self) -> io::Result<()> {
         if self.block.len() >= self.blocking_factor {
             self.inner.write_all(&self.block[..self.blocking_factor])?;
-            
-            let mut commit_length = self.blocking_factor as u64;
-            let mut first_uncommitted = 0;
-
-            for zone in &mut self.uncommitted_data_zones {
-                if let Some(overhang) = zone.write_committed(commit_length) {
-                    commit_length = overhang;
-                    first_uncommitted += 1;
-                } else {
-                    break;
-                }
-            }
-
-            self.uncommitted_data_zones.drain(..first_uncommitted);
+            self.datazone_stream.write_committed(self.blocking_factor as u64);
 
             //This is actually safe, because this always acts to shrink
             //the array, failing to drop values properly is safe (though
@@ -105,43 +85,28 @@ impl<W: Write, P> BlockingWriter<W, P> where P: Clone  {
     }
 }
 
-impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone, W: RecoverableWrite<P> {
+impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone + PartialEq, W: RecoverableWrite<P> {
     fn begin_data_zone(&mut self, ident: P) {
-        self.end_data_zone();
-
-        self.current_data_zone = Some(DataZone::new(ident.clone()));
-
+        self.datazone_stream.begin_data_zone(ident.clone());
         self.inner.begin_data_zone(ident);
     }
 
     fn end_data_zone(&mut self) {
-        if let Some(ref zone) = self.current_data_zone {
-            self.uncommitted_data_zones.push(zone.clone());
-        }
-
-        self.current_data_zone = None;
-
+        self.datazone_stream.end_data_zone();
         self.inner.end_data_zone();
     }
 
     fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
-        let mut inner_ucw = self.inner.uncommitted_writes();
-
-        inner_ucw.append(&mut self.uncommitted_data_zones.clone());
-
-        if let Some(ref zone) = self.current_data_zone {
-            inner_ucw.push(zone.clone());
-        }
-
-        inner_ucw
+        let inner_ucw = self.inner.uncommitted_writes();
+        self.datazone_stream.uncommitted_writes(Some(inner_ucw))
     }
 }
 
-impl<W:Write, P> ArchivalSink<P> for BlockingWriter<W, P> where W: Send + RecoverableWrite<P>, P: Send + Clone {
+impl<W:Write, P> ArchivalSink<P> for BlockingWriter<W, P> where W: Send + RecoverableWrite<P>, P: Send + Clone + PartialEq {
     
 }
 
-impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone, W: RecoverableWrite<P> {
+impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone + PartialEq, W: RecoverableWrite<P> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         //Precondition: Ensure the write buffer isn't full.
         self.empty_block()?;
@@ -160,10 +125,7 @@ impl<W:Write, P> Write for BlockingWriter<W, P> where P: Clone, W: RecoverableWr
                 match self.inner.write(&buf[shortcircuit_writes..(shortcircuit_writes + self.blocking_factor)]) {
                     Ok(blk_write) => {
                         shortcircuit_writes += blk_write;
-
-                        if let Some(ref mut zone) = self.current_data_zone {
-                            zone.write_through(blk_write as u64);
-                        }
+                        self.datazone_stream.write_through(blk_write as u64);
                     }
                     Err(x) => return Err(x)
                 }

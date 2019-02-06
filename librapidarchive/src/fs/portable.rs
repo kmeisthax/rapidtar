@@ -1,4 +1,5 @@
 use std::{io, fs, path, ffi};
+use std::cmp::PartialEq;
 use crate::{tar, tape, spanning};
 use crate::tuning::Configuration;
 
@@ -67,7 +68,7 @@ impl<I> ArchivalSink<I> for fs::File {
 /// only. Platform-specific sink functions may support opening other kinds of
 /// writers.
 #[allow(unused_variables)]
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
     let file = fs::File::create(outfile.as_ref())?;
 
     Ok(Box::new(file))

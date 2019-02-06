@@ -4,7 +4,7 @@ pub struct Configuration {
     pub channel_queue_depth: usize,
     pub parallel_io_limit: usize,
     pub blocking_factor: usize,
-    pub serial_buffer_limit: usize,
+    pub serial_buffer_limit: u64,
 }
 
 impl Default for Configuration {

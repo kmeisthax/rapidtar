@@ -71,7 +71,7 @@ impl<I> Div for DataSize<I> where I: Div + From<<I as Div>::Output> {
     }
 }
 
-impl<I> FromStr for DataSize<I> where I: FromStr + Mul + From<usize> + From<<I as Mul>::Output> {
+impl<I> FromStr for DataSize<I> where I: FromStr + Mul + From<<I as Mul>::Output> + NumCast {
     type Err = I::Err;
     
     fn from_str(s: &str) -> Result<DataSize<I>, Self::Err> {
@@ -79,19 +79,19 @@ impl<I> FromStr for DataSize<I> where I: FromStr + Mul + From<usize> + From<<I a
         
         if slen > 0 && s.chars().last().unwrap().to_ascii_lowercase() == 't' {
             Ok(DataSize{
-                inner: I::from(I::from_str(&s[..slen - 1])? * I::from((1024 * 1024 * 1024 * 1024) as usize))
+                inner: From::from(I::from_str(&s[..slen - 1])? * NumCast::from(1024 * 1024 * 1024 * 1024).unwrap())
             })
         } else if slen > 0 && s.chars().last().unwrap().to_ascii_lowercase() == 'g' {
             Ok(DataSize{
-                inner: I::from(I::from_str(&s[..slen - 1])? * I::from((1024 * 1024 * 1024) as usize))
+                inner: From::from(I::from_str(&s[..slen - 1])? * NumCast::from(1024 * 1024 * 1024).unwrap())
             })
         } else if slen > 0 && s.chars().last().unwrap().to_ascii_lowercase() == 'm' {
             Ok(DataSize{
-                inner: I::from(I::from_str(&s[..slen - 1])? * I::from((1024 * 1024) as usize))
+                inner: From::from(I::from_str(&s[..slen - 1])? * NumCast::from(1024 * 1024).unwrap())
             })
         } else if slen > 0 && s.chars().last().unwrap().to_ascii_lowercase() == 'k' {
             Ok(DataSize{
-                inner: I::from(I::from_str(&s[..slen - 1])? * I::from(1024 as usize))
+                inner: From::from(I::from_str(&s[..slen - 1])? * NumCast::from(1024).unwrap())
             })
         } else {
             Ok(DataSize{

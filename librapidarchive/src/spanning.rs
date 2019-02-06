@@ -1,6 +1,5 @@
 use std::{io, fs, cmp};
 use std::collections::VecDeque;
-use std::fmt::Debug;
 
 /// Represents data which has been committed to a write buffer and may fail to
 /// be written to the device.
@@ -110,7 +109,7 @@ pub struct DataZoneStream<P> {
     pending_zones: VecDeque<DataZone<P>>
 }
 
-impl<P> DataZoneStream<P> where P: Clone + PartialEq + Debug {
+impl<P> DataZoneStream<P> where P: Clone + PartialEq {
     pub fn new() -> DataZoneStream<P> {
         DataZoneStream{
             cur_zone: None,
@@ -123,6 +122,23 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq + Debug {
     pub fn write_buffered(&mut self, length: u64) {
         if let Some(ref mut zone) = self.cur_zone {
             zone.write_buffered(length);
+        }
+    }
+
+    /// Commit new bytes without buffering them.
+    /// 
+    /// For example, you may have a wrapper stream that, under certain
+    /// conditions, bypasses itself to improve performance. `write_through`
+    /// would be used to indicate that the data was copied without a buffer and
+    /// thus was committed immediately.
+    /// 
+    /// `DataZone`s and `DataZoneStream`s cannot properly track if you have
+    /// inadvertently called write_through on a zone with buffered data. Please
+    /// ensure that you only write_through when all buffered data has been
+    /// committed; otherwise the zone data may be wrong.
+    pub fn write_through(&mut self, length: u64) {
+        if let Some(ref mut zone) = self.cur_zone {
+            zone.write_through(length);
         }
     }
 
@@ -158,13 +174,13 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq + Debug {
         }
     }
 
-    fn begin_data_zone(&mut self, ident: P) {
+    pub fn begin_data_zone(&mut self, ident: P) {
         self.end_data_zone();
         
         self.cur_zone = Some(DataZone::new(ident.clone()));
     }
     
-    fn end_data_zone(&mut self) {
+    pub fn end_data_zone(&mut self) {
         if let Some(ref zone) = self.cur_zone {
             self.pending_zones.push_back(zone.clone());
         }
@@ -180,7 +196,7 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq + Debug {
     /// same order between both lists. Data zones must be present in the same
     /// order in this and the previous list if you want to be able to merge
     /// them, otherwise they will be concatenated.
-    fn uncommitted_writes(&self, chain: Option<Vec<DataZone<P>>>) -> Vec<DataZone<P>> {
+    pub fn uncommitted_writes(&self, chain: Option<Vec<DataZone<P>>>) -> Vec<DataZone<P>> {
         return match chain {
             Some(mut zonelist) => {
                 //Here's what we're looking for:

@@ -2,7 +2,7 @@ use std::{io, thread};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver};
 use crate::fs::ArchivalSink;
-use crate::spanning::{DataZone, RecoverableWrite};
+use crate::spanning::{DataZone, DataZoneStream, RecoverableWrite};
 
 enum ConcurrentCommand<I> where I: Send + Clone {
     #[allow(dead_code)]
@@ -107,14 +107,13 @@ pub struct ConcurrentWriteBuffer<T: io::Write + Send, P: Send + Clone> {
     cmd_send: Sender<ConcurrentCommand<P>>,
     resp_recv: Receiver<ConcurrentResponse>,
     inner: Arc<Mutex<T>>,
-    buffered_size: usize,
-    buffered_limit: usize,
-    current_data_zone: Option<DataZone<P>>,
-    uncommitted_data_zones: Vec<DataZone<P>>
+    buffered_size: u64,
+    buffered_limit: u64,
+    datazone_stream: DataZoneStream<P>
 }
 
-impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone {
-    pub fn new(inner: T, limit: usize) -> ConcurrentWriteBuffer<T, P> {
+impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone + PartialEq {
+    pub fn new(inner: T, limit: u64) -> ConcurrentWriteBuffer<T, P> {
         let (cmd_send, cmd_recv) = channel();
         let (resp_send, resp_recv) = channel();
         let self_inner_mtx = Arc::new(Mutex::new(inner));
@@ -130,8 +129,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
             inner: self_inner_mtx,
             buffered_size: 0,
             buffered_limit: limit,
-            current_data_zone: None,
-            uncommitted_data_zones: Vec::new(),
+            datazone_stream: DataZoneStream::new()
         }
     }
     
@@ -139,35 +137,13 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
     /// 
     /// This will subtract the committed data from the uncommitted data zones
     /// currently registered with this write buffer.
-    fn mark_data_committed(&mut self, committed_size: usize) {
-        let mut commit_remain = committed_size as u64;
-        let mut first_uncommitted = 0;
-
-        for zone in &mut self.uncommitted_data_zones {
-            if let Some(overhang) = zone.write_committed(commit_remain) {
-                commit_remain = overhang;
-                first_uncommitted += 1;
-            } else {
-                break;
-            }
-        }
-        
-        self.uncommitted_data_zones.drain(..first_uncommitted);
-        
-        if commit_remain > 0 {
-            if let Some(ref mut curzone) = self.current_data_zone {
-                curzone.write_committed(commit_remain);
-            }
-        }
-        
+    fn mark_data_committed(&mut self, committed_size: u64) {
+        self.datazone_stream.write_committed(committed_size);
         self.buffered_size = self.buffered_size - committed_size;
     }
     
-    fn mark_data_buffered(&mut self, buffered_size: usize) {
-        if let Some(ref mut curzone) = self.current_data_zone {
-            curzone.write_buffered(buffered_size as u64);
-        }
-        
+    fn mark_data_buffered(&mut self, buffered_size: u64) {
+        self.datazone_stream.write_buffered(buffered_size);
         self.buffered_size = self.buffered_size + buffered_size;
     }
     
@@ -176,12 +152,12 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
     /// 
     /// If the requested space exceeds the quota we do not attempt to block at
     /// all, otherwise the thread would deadlock.
-    fn drain_buf_until_space(&mut self, needed_space: usize) -> io::Result<()> {
+    fn drain_buf_until_space(&mut self, needed_space: u64) -> io::Result<()> {
         //TODO: If the buffer thread terminated somehow, we need to have some
         //kind of recovery for it
         while (needed_space < self.buffered_limit) && ((self.buffered_size + needed_space) > self.buffered_limit) {
             match self.resp_recv.recv() {
-                Ok(DidWriteAll(Ok(size))) => self.mark_data_committed(size),
+                Ok(DidWriteAll(Ok(size))) => self.mark_data_committed(size as u64),
                 Ok(DidWriteAll(Err(e))) => return Err(e),
                 Ok(DidRead(Err(e))) => return Err(e), //this shouldn't happen but w/e
                 Ok(DidFlush(Err(e))) => return Err(e),
@@ -201,7 +177,7 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
         //kind of recovery for it
         loop {
             match self.resp_recv.recv() {
-                Ok(DidWriteAll(Ok(size))) => self.mark_data_committed(size),
+                Ok(DidWriteAll(Ok(size))) => self.mark_data_committed(size as u64),
                 Ok(DidWriteAll(Err(e))) => return Err(e),
                 Ok(DidRead(Err(e))) => return Err(e), //this shouldn't happen but w/e
                 Ok(DidFlush(Ok(()))) => return Ok(()),
@@ -213,11 +189,11 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
     }
 }
 
-impl<T, P> io::Write for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone {
+impl<T, P> io::Write for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone + PartialEq {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.drain_buf_until_space(buf.len())?;
+        self.drain_buf_until_space(buf.len() as u64)?;
         
-        self.mark_data_buffered(buf.len());
+        self.mark_data_buffered(buf.len() as u64);
         self.cmd_send.send(DoWriteAll(buf.to_vec())).unwrap();
         
         Ok(buf.len())
@@ -232,35 +208,21 @@ impl<T, P> io::Write for ConcurrentWriteBuffer<T, P> where T: 'static + io::Writ
     }
 }
 
-impl<T, P> RecoverableWrite<P> for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone {
+impl<T, P> RecoverableWrite<P> for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone + PartialEq {
     fn begin_data_zone(&mut self, ident: P) {
-        self.end_data_zone();
-        
-        self.current_data_zone = Some(DataZone::new(ident.clone()));
-
+        self.datazone_stream.begin_data_zone(ident.clone());
         self.cmd_send.send(DoBeginDataZone(ident)).unwrap();
     }
     
     fn end_data_zone(&mut self) {
-        if let Some(ref zone) = self.current_data_zone {
-            self.uncommitted_data_zones.push(zone.clone());
-        }
-        
-        self.current_data_zone = None;
-        
+        self.datazone_stream.end_data_zone();
         self.cmd_send.send(DoEndDataZone).unwrap();
     }
     
     fn uncommitted_writes(&self) -> Vec<DataZone<P>> {
-        let mut inner_ucw = (*self.inner.lock().unwrap()).uncommitted_writes();
+        let inner_ucw = (*self.inner.lock().unwrap()).uncommitted_writes();
 
-        inner_ucw.append(&mut self.uncommitted_data_zones.clone());
-
-        if let Some(ref zone) = self.current_data_zone {
-            inner_ucw.push(zone.clone());
-        }
-
-        inner_ucw
+        self.datazone_stream.uncommitted_writes(Some(inner_ucw))
     }
 }
 
@@ -271,5 +233,5 @@ impl<T, P> Drop for ConcurrentWriteBuffer<T, P> where T: io::Write + Send, P: Se
     }
 }
 
-impl<T, P> ArchivalSink<P> for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone {
+impl<T, P> ArchivalSink<P> for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone + PartialEq {
 }

@@ -1,4 +1,5 @@
 use std::{io, fs, ffi, path, thread, time};
+use std::cmp::PartialEq;
 use crate::tape;
 use crate::tape::windows::WindowsTapeDevice;
 use crate::blocking::BlockingWriter;
@@ -15,7 +16,7 @@ pub use crate::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 /// 
 /// This is the Windows version of the function. It supports writes to files
 /// and tape devices.
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
     let mut is_tape = false;
     
     {
