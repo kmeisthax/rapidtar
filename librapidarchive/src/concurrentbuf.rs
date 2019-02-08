@@ -10,6 +10,7 @@ enum ConcurrentCommand<I> where I: Send + Clone {
     DoWriteAll(Vec<u8>),
     DoFlush,
     DoBeginDataZone(I),
+    DoResumeDataZone(I, u64),
     DoEndDataZone,
     Terminate,
 }
@@ -19,6 +20,7 @@ enum ConcurrentResponse {
     DidWriteAll(io::Result<usize>),
     DidFlush(io::Result<()>),
     DidBeginDataZone,
+    DidResumeDataZone,
     DidEndDataZone,
     Terminated
 }
@@ -62,6 +64,13 @@ fn command_task_write<T, P>(inner_mtx: Arc<Mutex<T>>, cmd_recv: Receiver<Concurr
                     inner.begin_data_zone(ident);
                     
                     if let Err(_) = cmd_send.send(DidBeginDataZone) {
+                        break;
+                    }
+                },
+                DoResumeDataZone(ident, commit) => {
+                    inner.resume_data_zone(ident, commit);
+                    
+                    if let Err(_) = cmd_send.send(DidResumeDataZone) {
                         break;
                     }
                 },
@@ -212,6 +221,11 @@ impl<T, P> RecoverableWrite<P> for ConcurrentWriteBuffer<T, P> where T: 'static 
     fn begin_data_zone(&mut self, ident: P) {
         self.datazone_stream.begin_data_zone(ident.clone());
         self.cmd_send.send(DoBeginDataZone(ident)).unwrap();
+    }
+
+    fn resume_data_zone(&mut self, ident: P, committed: u64) {
+        self.datazone_stream.resume_data_zone(ident.clone(), committed);
+        self.cmd_send.send(DoResumeDataZone(ident, committed)).unwrap();
     }
     
     fn end_data_zone(&mut self) {

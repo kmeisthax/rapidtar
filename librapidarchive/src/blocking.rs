@@ -91,6 +91,11 @@ impl<W:Write, P> RecoverableWrite<P> for BlockingWriter<W, P> where P: Clone + P
         self.inner.begin_data_zone(ident);
     }
 
+    fn resume_data_zone(&mut self, ident: P, committed: u64) {
+        self.datazone_stream.resume_data_zone(ident.clone(), committed);
+        self.inner.resume_data_zone(ident, committed);
+    }
+
     fn end_data_zone(&mut self) {
         self.datazone_stream.end_data_zone();
         self.inner.end_data_zone();

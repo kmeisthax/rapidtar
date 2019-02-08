@@ -25,6 +25,15 @@ impl<P> DataZone<P> {
         }
     }
 
+    pub fn for_resumption(ident: P, committed: u64) -> DataZone<P> {
+        DataZone{
+            ident: ident,
+            length: committed,
+            committed_length: committed,
+            uncommitted_length: 0
+        }
+    }
+
     /// Mark a number of bytes which were successfully written through without
     /// buffering.
     pub fn write_through(&mut self, length: u64) {
@@ -179,6 +188,12 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq {
         
         self.cur_zone = Some(DataZone::new(ident.clone()));
     }
+
+    pub fn resume_data_zone(&mut self, ident: P, committed: u64) {
+        self.end_data_zone();
+        
+        self.cur_zone = Some(DataZone::for_resumption(ident.clone(), committed));
+    }
     
     pub fn end_data_zone(&mut self) {
         if let Some(ref zone) = self.cur_zone {
@@ -324,6 +339,17 @@ pub trait RecoverableWrite<P> : io::Write {
     /// A data zone represents a range of bytes in the written stream which can
     /// be attributed to a single source, such as a file being archived.
     fn begin_data_zone(&mut self, _ident: P) {
+
+    }
+
+    /// Mark the start of a data zone being recovered.
+    /// 
+    /// A new data zone will be created with a length and commit length equal
+    /// to the length specified in `committed`. This can be used to indicate an
+    /// in-progress recovery and ensure that a second write fault on another
+    /// volume (say, a file larger than the size of two volumes) can be
+    /// correctly recovered from.
+    fn resume_data_zone(&mut self, _ident: P, _committed: u64) {
 
     }
 
