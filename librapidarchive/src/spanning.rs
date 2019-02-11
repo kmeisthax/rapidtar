@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 /// be written to the device.
 #[derive(Clone, Debug)]
 pub struct DataZone<P> {
-    pub ident: P,
+    pub ident: Option<P>,
     /// The total count of bytes written within this zone. Must equal the sum
     /// of `committed_length` and `uncommitted_length`
     pub length: u64,
@@ -18,7 +18,7 @@ pub struct DataZone<P> {
 impl<P> DataZone<P> {
     pub fn new(ident: P) -> DataZone<P> {
         DataZone{
-            ident: ident,
+            ident: Some(ident),
             length: 0,
             committed_length: 0,
             uncommitted_length: 0
@@ -27,9 +27,23 @@ impl<P> DataZone<P> {
 
     pub fn for_resumption(ident: P, committed: u64) -> DataZone<P> {
         DataZone{
-            ident: ident,
+            ident: Some(ident),
             length: committed,
             committed_length: committed,
+            uncommitted_length: 0
+        }
+    }
+
+    /// Create a zone that represents data written outside of a data zone.
+    /// 
+    /// Slack zones are data that was not intended to be recovered in the event
+    /// of write failure and exist only to ensure counts between active data
+    /// zones are correct.
+    pub fn slack_zone() -> DataZone<P> {
+        DataZone{
+            ident: None,
+            length: 0,
+            committed_length: 0,
             uncommitted_length: 0
         }
     }
@@ -60,7 +74,7 @@ impl<P> DataZone<P> {
     /// If the commitment range exactly matches the length of the zone, then
     /// this function returns zero.
     pub fn write_committed(&mut self, length: u64) -> Option<u64> {
-        if self.uncommitted_length > length {
+        if self.uncommitted_length >= length {
             self.uncommitted_length -= length;
             self.committed_length += length;
 
@@ -197,10 +211,14 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq {
     
     pub fn end_data_zone(&mut self) {
         if let Some(ref zone) = self.cur_zone {
-            self.pending_zones.push_back(zone.clone());
+            if let Some(_) = zone.ident {
+                self.pending_zones.push_back(zone.clone());
+            } else if zone.length > 0 {
+                self.pending_zones.push_back(zone.clone());
+            }
         }
-        
-        self.cur_zone = None;
+
+        self.cur_zone = Some(DataZone::slack_zone());
     }
     
     /// Collect and display all of the data zones stored within the list as a
@@ -300,6 +318,14 @@ impl<P> DataZoneStream<P> where P: Clone + PartialEq {
 
                         if let Some(cur_zone) = &self.cur_zone {
                             zonelist.push(cur_zone.clone());
+                        }
+                    }
+                }
+
+                if let Some(ref maybe_slack) = zonelist.get(zonelist.len() - 1) {
+                    if let None = maybe_slack.ident {
+                        if maybe_slack.length == 0 {
+                            zonelist.pop();
                         }
                     }
                 }
@@ -461,6 +487,19 @@ mod tests {
     }
 
     #[test]
+    fn datazone_overhang_exact() {
+        let mut dz = DataZone::new(0);
+
+        dz.write_buffered(1536);
+        let commit_result = dz.write_committed(1536);
+
+        assert_eq!(dz.length, 1536);
+        assert_eq!(dz.committed_length, 1536);
+        assert_eq!(dz.uncommitted_length, 0);
+        assert_eq!(commit_result, None);
+    }
+
+    #[test]
     fn datazone_stream() {
         let mut dzs = DataZoneStream::new();
 
@@ -476,11 +515,11 @@ mod tests {
 
         assert_eq!(commit_result, None);
         assert_eq!(uncommitted_zones.len(), 2);
-        assert_eq!(uncommitted_zones[0].ident, 1);
+        assert_eq!(uncommitted_zones[0].ident, Some(1));
         assert_eq!(uncommitted_zones[0].length, 1024);
         assert_eq!(uncommitted_zones[0].committed_length, 512);
         assert_eq!(uncommitted_zones[0].uncommitted_length, 512);
-        assert_eq!(uncommitted_zones[1].ident, 2);
+        assert_eq!(uncommitted_zones[1].ident, Some(2));
         assert_eq!(uncommitted_zones[1].length, 768);
         assert_eq!(uncommitted_zones[1].committed_length, 0);
         assert_eq!(uncommitted_zones[1].uncommitted_length, 768);
@@ -502,7 +541,7 @@ mod tests {
 
         assert_eq!(commit_result, None);
         assert_eq!(uncommitted_zones.len(), 1);
-        assert_eq!(uncommitted_zones[0].ident, 2);
+        assert_eq!(uncommitted_zones[0].ident, Some(2));
         assert_eq!(uncommitted_zones[0].length, 768);
         assert_eq!(uncommitted_zones[0].committed_length, 512);
         assert_eq!(uncommitted_zones[0].uncommitted_length, 256);
@@ -524,7 +563,7 @@ mod tests {
 
         assert_eq!(commit_result, Some(1792));
         assert_eq!(uncommitted_zones.len(), 1);
-        assert_eq!(uncommitted_zones[0].ident, 2);
+        assert_eq!(uncommitted_zones[0].ident, Some(2));
         assert_eq!(uncommitted_zones[0].length, 768);
         assert_eq!(uncommitted_zones[0].committed_length, 768);
         assert_eq!(uncommitted_zones[0].uncommitted_length, 0);
@@ -558,11 +597,11 @@ mod tests {
 
         assert_eq!(commit_result_behind, None);
         assert_eq!(uncommitted_zones_behind.len(), 2);
-        assert_eq!(uncommitted_zones_behind[0].ident, 1);
+        assert_eq!(uncommitted_zones_behind[0].ident, Some(1));
         assert_eq!(uncommitted_zones_behind[0].length, 1024);
         assert_eq!(uncommitted_zones_behind[0].committed_length, 512);
         assert_eq!(uncommitted_zones_behind[0].uncommitted_length, 512);
-        assert_eq!(uncommitted_zones_behind[1].ident, 2);
+        assert_eq!(uncommitted_zones_behind[1].ident, Some(2));
         assert_eq!(uncommitted_zones_behind[1].length, 768);
         assert_eq!(uncommitted_zones_behind[1].committed_length, 0);
         assert_eq!(uncommitted_zones_behind[1].uncommitted_length, 768);
@@ -571,13 +610,100 @@ mod tests {
         
         assert_eq!(commit_result, Some(512));
         assert_eq!(uncommitted_zones.len(), 2);
-        assert_eq!(uncommitted_zones[0].ident, 1);
+        assert_eq!(uncommitted_zones[0].ident, Some(1));
         assert_eq!(uncommitted_zones[0].length, 1024);
         assert_eq!(uncommitted_zones[0].committed_length, 512);
         assert_eq!(uncommitted_zones[0].uncommitted_length, 512);
-        assert_eq!(uncommitted_zones[1].ident, 2);
+        assert_eq!(uncommitted_zones[1].ident, Some(2));
         assert_eq!(uncommitted_zones[1].length, 2048);
         assert_eq!(uncommitted_zones[1].committed_length, 0);
         assert_eq!(uncommitted_zones[1].uncommitted_length, 2048);
+    }
+
+    #[test]
+    fn datazone_stream_overslack() {
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.end_data_zone();
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(768);
+
+        let commit_result = dzs.write_committed(4096);
+        let uncommitted_zones = dzs.uncommitted_writes(None);
+
+        assert_eq!(commit_result, Some(1280));
+        assert_eq!(uncommitted_zones.len(), 1);
+        assert_eq!(uncommitted_zones[0].ident, Some(2));
+        assert_eq!(uncommitted_zones[0].length, 768);
+        assert_eq!(uncommitted_zones[0].committed_length, 768);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 0);
+    }
+
+    #[test]
+    fn datazone_stream_mergeslack() {
+        let mut dzs_behind = DataZoneStream::new();
+
+        dzs_behind.begin_data_zone(0);
+        dzs_behind.write_buffered(512);
+        dzs_behind.begin_data_zone(1);
+        dzs_behind.write_buffered(1024);
+        dzs_behind.end_data_zone();
+        dzs_behind.write_buffered(512);
+        dzs_behind.begin_data_zone(2);
+        dzs_behind.write_buffered(768);
+
+        let commit_result_behind = dzs_behind.write_committed(1024);
+
+        let mut dzs = DataZoneStream::new();
+
+        dzs.begin_data_zone(0);
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(1);
+        dzs.write_buffered(1024);
+        dzs.end_data_zone();
+        dzs.write_buffered(512);
+        dzs.begin_data_zone(2);
+        dzs.write_buffered(1536);
+
+        let commit_result = dzs.write_committed(4096);
+
+        let uncommitted_zones_behind = dzs_behind.uncommitted_writes(None);
+
+        assert_eq!(commit_result_behind, None);
+        assert_eq!(uncommitted_zones_behind.len(), 3);
+        assert_eq!(uncommitted_zones_behind[0].ident, Some(1));
+        assert_eq!(uncommitted_zones_behind[0].length, 1024);
+        assert_eq!(uncommitted_zones_behind[0].committed_length, 512);
+        assert_eq!(uncommitted_zones_behind[0].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones_behind[1].ident, None);
+        assert_eq!(uncommitted_zones_behind[1].length, 512);
+        assert_eq!(uncommitted_zones_behind[1].committed_length, 0);
+        assert_eq!(uncommitted_zones_behind[1].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones_behind[2].ident, Some(2));
+        assert_eq!(uncommitted_zones_behind[2].length, 768);
+        assert_eq!(uncommitted_zones_behind[2].committed_length, 0);
+        assert_eq!(uncommitted_zones_behind[2].uncommitted_length, 768);
+
+        let uncommitted_zones = dzs.uncommitted_writes(Some(uncommitted_zones_behind));
+        
+        assert_eq!(commit_result, Some(512));
+        assert_eq!(uncommitted_zones.len(), 3);
+        assert_eq!(uncommitted_zones[0].ident, Some(1));
+        assert_eq!(uncommitted_zones[0].length, 1024);
+        assert_eq!(uncommitted_zones[0].committed_length, 512);
+        assert_eq!(uncommitted_zones[0].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones[1].ident, None);
+        assert_eq!(uncommitted_zones[1].length, 512);
+        assert_eq!(uncommitted_zones[1].committed_length, 0);
+        assert_eq!(uncommitted_zones[1].uncommitted_length, 512);
+        assert_eq!(uncommitted_zones[2].ident, Some(2));
+        assert_eq!(uncommitted_zones[2].length, 1536);
+        assert_eq!(uncommitted_zones[2].committed_length, 0);
+        assert_eq!(uncommitted_zones[2].uncommitted_length, 1536);
     }
 }

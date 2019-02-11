@@ -247,11 +247,11 @@ mod tests {
         let zones = blk.uncommitted_writes();
 
         assert_eq!(zones.len(), 2);
-        assert_eq!(zones[0].ident, ident1);
+        assert_eq!(zones[0].ident, Some(ident1));
         assert_eq!(zones[0].length, 512);
         assert_eq!(zones[0].uncommitted_length, 512);
         assert_eq!(zones[0].committed_length, 0);
-        assert_eq!(zones[1].ident, ident2);
+        assert_eq!(zones[1].ident, Some(ident2));
         assert_eq!(zones[1].length, 512);
         assert_eq!(zones[1].uncommitted_length, 512);
         assert_eq!(zones[1].committed_length, 0);
