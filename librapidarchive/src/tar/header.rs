@@ -84,6 +84,36 @@ pub struct TarHeader {
     pub recovery_seek_offset: Option<usize>,
 }
 
+impl TarHeader {
+    pub fn abstract_header_for_file(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
+        Ok(TarHeader {
+            path: Box::new(normalize::normalize(&archival_path)),
+            unix_mode: get_unix_mode(entry_metadata)?,
+
+            //TODO: Get plausible IDs for these.
+            unix_uid: 0,
+            unix_gid: 0,
+            file_size: entry_metadata.len(),
+            mtime: entry_metadata.modified().ok(),
+
+            //TODO: All of these are placeholders.
+            file_type: get_file_type(entry_metadata)?,
+            symlink_path: None,
+            unix_uname: "root".to_string(),
+            unix_gname: "root".to_string(),
+            unix_devmajor: 0,
+            unix_devminor: 0,
+
+            atime: entry_metadata.accessed().ok(),
+            birthtime: entry_metadata.created().ok(),
+
+            recovery_path: None,
+            recovery_total_size: None,
+            recovery_seek_offset: None
+        })
+    }
+}
+
 /// A serialized tar header, ready for serialization into an archive.
 ///
 /// # File caching
@@ -117,33 +147,7 @@ pub struct HeaderGenResult {
 /// fails or the item is not a file then the file_prefix field will be None.
 ///
 /// TODO: Make headergen read-ahead caching maximum configurable.
-pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata, format: TarFormat) -> io::Result<HeaderGenResult> {
-    let tarheader = TarHeader {
-        path: Box::new(normalize::normalize(&archival_path)),
-        unix_mode: get_unix_mode(entry_metadata)?,
-
-        //TODO: Get plausible IDs for these.
-        unix_uid: 0,
-        unix_gid: 0,
-        file_size: entry_metadata.len(),
-        mtime: entry_metadata.modified().ok(),
-
-        //TODO: All of these are placeholders.
-        file_type: get_file_type(entry_metadata)?,
-        symlink_path: None,
-        unix_uname: "root".to_string(),
-        unix_gname: "root".to_string(),
-        unix_devmajor: 0,
-        unix_devminor: 0,
-
-        atime: entry_metadata.accessed().ok(),
-        birthtime: entry_metadata.created().ok(),
-
-        recovery_path: None,
-        recovery_total_size: None,
-        recovery_seek_offset: None
-    };
-
+pub fn headergen(entry_path: &path::Path, archival_path: &path::Path, tarheader: TarHeader, format: TarFormat) -> io::Result<HeaderGenResult> {
     let mut concrete_tarheader = match format {
         TarFormat::USTAR => ustar::ustar_header(&tarheader)?,
         TarFormat::POSIX => pax::pax_header(&tarheader)?
