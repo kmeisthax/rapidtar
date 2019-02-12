@@ -80,8 +80,8 @@ pub struct TarHeader {
     pub atime: Option<time::SystemTime>,
     pub birthtime: Option<time::SystemTime>,
     pub recovery_path: Option<Box<path::PathBuf>>,
-    pub recovery_total_size: Option<usize>,
-    pub recovery_seek_offset: Option<usize>,
+    pub recovery_total_size: Option<u64>,
+    pub recovery_seek_offset: Option<u64>,
 }
 
 impl TarHeader {
