@@ -85,7 +85,7 @@ pub struct TarHeader {
 }
 
 impl TarHeader {
-    pub fn abstract_header_for_file(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
+    pub fn abstract_header_for_file(archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
         Ok(TarHeader {
             path: Box::new(normalize::normalize(&archival_path)),
             unix_mode: get_unix_mode(entry_metadata)?,
