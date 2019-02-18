@@ -1,4 +1,4 @@
-use std::{io, ptr, fmt, ffi, mem};
+use std::{io, ptr, fmt, ffi};
 use std::os::windows::ffi::OsStrExt;
 use std::marker::PhantomData;
 use winapi::um::{winbase, fileapi};
@@ -33,10 +33,10 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     
     /// Open a tape device by it's NT device path.
     pub fn open_device(nt_device_path : &ffi::OsStr) -> io::Result<WindowsTapeDevice<P>> {
-        let nt_device_path_ffi : Vec<WCHAR> = nt_device_path.encode_wide().collect();
+        let mut nt_device_path_ffi : Vec<WCHAR> = nt_device_path.encode_wide().collect();
+        nt_device_path_ffi.push(0 as WCHAR);
+
         let nt_device_ptr = nt_device_path_ffi.as_ptr();
-        
-        mem::forget(nt_device_ptr);
         
         let nt_device = unsafe { fileapi::CreateFileW(nt_device_ptr, GENERIC_READ | GENERIC_WRITE, 0, ptr::null_mut(), OPEN_EXISTING, 0, ptr::null_mut()) };
         
