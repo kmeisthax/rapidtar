@@ -1,11 +1,11 @@
-use std::{io, ptr, fmt, ffi};
+use std::{io, ptr, fmt, ffi, mem, cmp};
 use std::os::windows::ffi::OsStrExt;
 use std::marker::PhantomData;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
-use winapi::shared::minwindef::{BOOL, LPCVOID, DWORD};
-use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA};
-use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
+use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
+use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -15,7 +15,9 @@ use crate::fs::ArchivalSink;
 
 pub struct WindowsTapeDevice<P = u64> where P: Sized {
     tape_device: HANDLE,
-    last_ident: PhantomData<P>
+    last_ident: PhantomData<P>,
+    block_spill_buffer: Vec<u8>,
+    block_spill_read_pos: usize
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -57,8 +59,56 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     pub unsafe fn from_device_handle(nt_device : HANDLE) -> WindowsTapeDevice<P> {
         WindowsTapeDevice {
             tape_device: nt_device,
-            last_ident: PhantomData
+            last_ident: PhantomData,
+            block_spill_buffer: Vec::new(),
+            block_spill_read_pos: 0,
         }
+    }
+}
+
+impl<P> WindowsTapeDevice<P> {
+    /// Reads the next block off the tape directly from the Windows API into the
+    /// spill buffer.
+    fn read_next_block(&mut self) -> io::Result<()> {
+        let mut starting_position_lo : DWORD = 0;
+        let mut starting_position_hi : DWORD = 0;
+
+        let mut res = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, ptr::null_mut(), &mut starting_position_lo, &mut starting_position_hi) };
+        if res != NO_ERROR {
+            return Err(io::Error::from_raw_os_error(res as i32));
+        }
+
+        loop {
+            let mut read_count : DWORD = 0;
+
+            if unsafe { fileapi::ReadFile(self.tape_device, self.block_spill_buffer.as_mut_ptr() as LPVOID, self.block_spill_buffer.capacity() as DWORD, &mut read_count, ptr::null_mut()) } != TRUE as BOOL {
+                let err = io::Error::last_os_error();
+
+                match err.raw_os_error() {
+                    Some(errcode) => if errcode == ERROR_MORE_DATA as i32 {
+                        self.block_spill_buffer.reserve(self.block_spill_buffer.capacity());
+
+                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, 0, starting_position_lo, starting_position_hi, FALSE as BOOL) };
+                        if res != NO_ERROR {
+                            return Err(io::Error::from_raw_os_error(res as i32));
+                        }
+
+                        continue;
+                    } else {
+                        return Err(io::Error::from_raw_os_error(errcode as i32));
+                    },
+                    _ => return Err(err)
+                };
+            }
+
+            let bounded_read_count = cmp::min(read_count as usize, self.block_spill_buffer.capacity());
+
+            unsafe { self.block_spill_buffer.set_len(bounded_read_count); };
+
+            break;
+        }
+
+        Ok(())
     }
 }
 
@@ -89,6 +139,46 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     }
 }
 
+impl<P> io::Read for WindowsTapeDevice<P> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        //Reading from tape on Windows is a little weird, because Windows really
+        //wants to return one block at a time. If you attempt to read data with
+        //a smaller buffer than what's on the tape, then Windows will try to
+        //both service the read, report an error condition, and seek the tape
+        //forward. This violates the semantics of more or less every read API
+        //ever, including Rust's io::Read trait.
+
+        if self.block_spill_read_pos == 0 {
+            self.read_next_block()?;
+
+            if self.block_spill_buffer.len() <= buf.len() {
+                //Given buffer is long enough, return a tape block.
+                //TODO: Can we avoid this copy?
+                buf[..self.block_spill_buffer.len()].clone_from_slice(&self.block_spill_buffer);
+                Ok(self.block_spill_buffer.len())
+            } else {
+                //Given buffer is short, switch into buffered mode.
+                buf[..].clone_from_slice(&self.block_spill_buffer);
+                self.block_spill_read_pos = buf.len();
+
+                Ok(buf.len())
+            }
+        } else {
+            let remain_buf_count = self.block_spill_buffer.len() - self.block_spill_read_pos;
+            if remain_buf_count <= buf.len() {
+                //Given buffer is long enough, return the rest of the tape block.
+                buf[..remain_buf_count].clone_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..]);
+                self.block_spill_read_pos = 0;
+                Ok(remain_buf_count)
+            } else {
+                buf[..].clone_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..]);
+                self.block_spill_read_pos += buf.len();
+                Ok(buf.len())
+            }
+        }
+    }
+}
+
 impl<P> RecoverableWrite<P> for WindowsTapeDevice<P> where P: Clone {
 }
 
@@ -96,6 +186,20 @@ impl<P> ArchivalSink<P> for WindowsTapeDevice<P> where P: Send + Clone {
 }
 
 impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
+    fn read_until_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
+        if self.block_spill_read_pos == 0 {
+            self.read_next_block()?;
+        }
+        
+        let last_cap = self.block_spill_buffer.capacity();
+
+        mem::swap(buf, &mut self.block_spill_buffer);
+
+        self.block_spill_buffer = Vec::with_capacity(last_cap);
+
+        Ok(())
+    }
+
     fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
         match pos {
             io::SeekFrom::Start(target) => {
