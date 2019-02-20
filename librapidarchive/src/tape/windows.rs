@@ -5,7 +5,7 @@ use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
 use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA};
-use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND, TAPE_FILEMARKS};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -196,6 +196,20 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
         mem::swap(buf, &mut self.block_spill_buffer);
 
         self.block_spill_buffer = Vec::with_capacity(last_cap);
+
+        Ok(())
+    }
+
+    fn write_filemark(&mut self, blocking: bool) -> io::Result<()> {
+        let b_immediate = match blocking {
+            true => TRUE as BOOL,
+            false => FALSE as BOOL
+        };
+
+        let error = unsafe { winbase::WriteTapemark(self.tape_device, TAPE_FILEMARKS, 1, b_immediate) };
+        if error != NO_ERROR {
+            return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error writing filemark: {}", error)));
+        }
 
         Ok(())
     }

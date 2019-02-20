@@ -15,6 +15,9 @@ pub trait TapeDevice : io::Write + io::Read {
     /// guaranteed to never encounter a partial block.
     fn read_until_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()>;
 
+    /// Write a filemark onto the tape.
+    fn write_filemark(&mut self, blocking: bool) -> io::Result<()>;
+
     /// Seek by a number of filemarks on the tape.
     /// 
     /// This function operates similarly to `seek`, but operates in units of
