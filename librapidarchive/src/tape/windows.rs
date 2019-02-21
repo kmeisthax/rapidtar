@@ -5,7 +5,7 @@ use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
 use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA};
-use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND, TAPE_FILEMARKS};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -45,6 +45,14 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
         if nt_device == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error());
         }
+
+        //Kick the drive into variable block mode.
+        //If we don't specify a block size, then reads always fail.
+        let media_param = TAPE_SET_MEDIA_PARAMETERS{ BlockSize: 0 };
+        let param_err = unsafe { winbase::SetTapeParameters(nt_device, 0, &media_param as *const _ as LPVOID) };
+        if param_err != NO_ERROR {
+            return Err(io::Error::from_raw_os_error(param_err as i32));
+        }
         
         unsafe {
             Ok(WindowsTapeDevice::from_device_handle(nt_device))
@@ -60,7 +68,7 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
         WindowsTapeDevice {
             tape_device: nt_device,
             last_ident: PhantomData,
-            block_spill_buffer: Vec::new(),
+            block_spill_buffer: Vec::with_capacity(1024),
             block_spill_read_pos: 0,
         }
     }
@@ -70,13 +78,10 @@ impl<P> WindowsTapeDevice<P> {
     /// Reads the next block off the tape directly from the Windows API into the
     /// spill buffer.
     fn read_next_block(&mut self) -> io::Result<()> {
+        let mut starting_partition : DWORD = 0;
         let mut starting_position_lo : DWORD = 0;
         let mut starting_position_hi : DWORD = 0;
-
-        let mut res = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, ptr::null_mut(), &mut starting_position_lo, &mut starting_position_hi) };
-        if res != NO_ERROR {
-            return Err(io::Error::from_raw_os_error(res as i32));
-        }
+        let mut res;
 
         loop {
             let mut read_count : DWORD = 0;
@@ -86,9 +91,22 @@ impl<P> WindowsTapeDevice<P> {
 
                 match err.raw_os_error() {
                     Some(errcode) => if errcode == ERROR_MORE_DATA as i32 {
-                        self.block_spill_buffer.reserve(self.block_spill_buffer.capacity());
+                        self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
 
-                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, 0, starting_position_lo, starting_position_hi, FALSE as BOOL) };
+                        res = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, &mut starting_partition, &mut starting_position_lo, &mut starting_position_hi) };
+                        if res != NO_ERROR {
+                            return Err(io::Error::from_raw_os_error(res as i32));
+                        }
+
+                        match starting_position_lo.overflowing_add(1) {
+                            (new_lo, false) => starting_position_lo = new_lo,
+                            (new_lo, true) => {
+                                starting_position_lo = new_lo;
+                                starting_position_hi = starting_position_hi.saturating_add(1);
+                            }
+                        }
+
+                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, starting_partition, starting_position_lo, starting_position_hi, FALSE as BOOL) };
                         if res != NO_ERROR {
                             return Err(io::Error::from_raw_os_error(res as i32));
                         }
@@ -100,7 +118,7 @@ impl<P> WindowsTapeDevice<P> {
                     _ => return Err(err)
                 };
             }
-
+            
             let bounded_read_count = cmp::min(read_count as usize, self.block_spill_buffer.capacity());
 
             unsafe { self.block_spill_buffer.set_len(bounded_read_count); };
@@ -142,40 +160,50 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
 impl<P> io::Read for WindowsTapeDevice<P> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         //Reading from tape on Windows is a little weird, because Windows really
-        //wants to return one block at a time. If you attempt to read data with
-        //a smaller buffer than what's on the tape, then Windows will try to
-        //both service the read, report an error condition, and seek the tape
-        //forward. This violates the semantics of more or less every read API
-        //ever, including Rust's io::Read trait.
+        //wants to return one block at a time. If the block won't fit, it'll
+        //just toss the data, which is why read_next_block exists. Furthermore,
+        //if we're being handed a very large buffer, we won't do anything with
+        //it. Since read treats the tape like a bytestream, let's buffer as much
+        //data as requested.
 
-        if self.block_spill_read_pos == 0 {
-            self.read_next_block()?;
+        let mut wrote = 0;
 
-            if self.block_spill_buffer.len() <= buf.len() {
-                //Given buffer is long enough, return a tape block.
-                //TODO: Can we avoid this copy?
-                buf[..self.block_spill_buffer.len()].clone_from_slice(&self.block_spill_buffer);
-                Ok(self.block_spill_buffer.len())
+        while wrote < buf.len() {
+            let remain = buf.len() - wrote;
+
+            if self.block_spill_read_pos == 0 {
+                self.read_next_block()?;
+
+                if self.block_spill_buffer.len() <= remain {
+                    //Given buffer is long enough, return a tape block.
+                    //TODO: Can we avoid this copy?
+                    buf[wrote..wrote + self.block_spill_buffer.len()].copy_from_slice(&self.block_spill_buffer);
+                    wrote += self.block_spill_buffer.len();
+                } else {
+                    //Given buffer is short, switch into buffered mode.
+                    buf[wrote..wrote + remain].copy_from_slice(&self.block_spill_buffer[..remain]);
+                    self.block_spill_read_pos = remain;
+
+                    wrote += remain;
+                }
             } else {
-                //Given buffer is short, switch into buffered mode.
-                buf[..].clone_from_slice(&self.block_spill_buffer);
-                self.block_spill_read_pos = buf.len();
-
-                Ok(buf.len())
-            }
-        } else {
-            let remain_buf_count = self.block_spill_buffer.len() - self.block_spill_read_pos;
-            if remain_buf_count <= buf.len() {
-                //Given buffer is long enough, return the rest of the tape block.
-                buf[..remain_buf_count].clone_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..]);
-                self.block_spill_read_pos = 0;
-                Ok(remain_buf_count)
-            } else {
-                buf[..].clone_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..]);
-                self.block_spill_read_pos += buf.len();
-                Ok(buf.len())
+                let spill_remain = self.block_spill_buffer.len() - self.block_spill_read_pos;
+                if spill_remain <= remain {
+                    //Given buffer is long enough, return the rest of the tape block.
+                    buf[wrote..wrote + spill_remain].copy_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..]);
+                    self.block_spill_read_pos = 0;
+                    wrote += spill_remain;
+                } else {
+                    buf[wrote..wrote + remain].copy_from_slice(&self.block_spill_buffer[self.block_spill_read_pos..self.block_spill_read_pos + remain]);
+                    self.block_spill_read_pos += remain;
+                    wrote += remain;
+                }
             }
         }
+
+        assert!(wrote <= buf.len());
+
+        Ok(wrote)
     }
 }
 
