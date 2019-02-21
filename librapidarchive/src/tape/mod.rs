@@ -9,11 +9,11 @@ pub trait TapeDevice : io::Write + io::Read {
     /// #Partial block reads
     /// Due to the semantics of `read`, this function may return a partial block
     /// if the previous read operation failed to read a full block. Mixed code
-    /// using both `read` and `read_until_block` is guaranteed to encounter the
+    /// using both `read` and `read_block` is guaranteed to encounter the
     /// same data contents as code that exclusively uses `read` or
-    /// `read_until_block`. Code that exclusively uses `read_until_block` is
+    /// `read_block`. Code that exclusively uses `read_block` is
     /// guaranteed to never encounter a partial block.
-    fn read_until_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()>;
+    fn read_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()>;
 
     /// Write a filemark onto the tape.
     fn write_filemark(&mut self, blocking: bool) -> io::Result<()>;

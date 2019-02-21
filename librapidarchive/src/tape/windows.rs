@@ -186,7 +186,7 @@ impl<P> ArchivalSink<P> for WindowsTapeDevice<P> where P: Send + Clone {
 }
 
 impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
-    fn read_until_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
+    fn read_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
         if self.block_spill_read_pos == 0 {
             self.read_next_block()?;
         }
