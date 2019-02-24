@@ -1,5 +1,6 @@
 //! Performance tuning related configuration
 
+#[derive(Copy, Clone)]
 pub struct Configuration {
     pub channel_queue_depth: usize,
     pub parallel_io_limit: usize,

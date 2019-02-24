@@ -80,12 +80,12 @@ pub struct TarHeader {
     pub atime: Option<time::SystemTime>,
     pub birthtime: Option<time::SystemTime>,
     pub recovery_path: Option<Box<path::PathBuf>>,
-    pub recovery_total_size: Option<usize>,
-    pub recovery_seek_offset: Option<usize>,
+    pub recovery_total_size: Option<u64>,
+    pub recovery_seek_offset: Option<u64>,
 }
 
 impl TarHeader {
-    pub fn abstract_header_for_file(entry_path: &path::Path, archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
+    pub fn abstract_header_for_file(archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
         Ok(TarHeader {
             path: Box::new(normalize::normalize(&archival_path)),
             unix_mode: get_unix_mode(entry_metadata)?,
