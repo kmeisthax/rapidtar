@@ -27,40 +27,26 @@ fn main() -> io::Result<()> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Please specify a device name, either with -f or TAPE environment variable")));
     }
     
-    let mut tapedevice = open_tape(tapename).unwrap();
+    let mut tapedevice = open_tape(tapename)?;
     
     match command.as_ref() {
-        "fsf" => { //Skip to next file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count)).unwrap();
-        },
+        "fsf" => tapedevice.seek_filemarks(io::SeekFrom::Current(count)),
         "fsfm" => { //Position to append to next file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(-1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(-1))
         },
-        "bsf" => { //Skip to end of previous file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
-        },
+        "bsf" => tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)),
         "bsfm" => { //Position to overwrite previous file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(1))
         },
         "asf" => { //Position to a specific file
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Start(0))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))
         },
-        "rewind" => { //Position to start of tape (partition)
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0)).unwrap();
-        },
-        "eod" => { //Position to end of tape (partition)
-            tapedevice.seek_filemarks(io::SeekFrom::End(0)).unwrap();
-        },
-        "setpartition" => {
-            tapedevice.seek_partition(count as u32 + 1).unwrap();
-        },
-        _ => {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command)));
-        }
+        "rewind" => tapedevice.seek_filemarks(io::SeekFrom::Start(0)),
+        "eod" => tapedevice.seek_filemarks(io::SeekFrom::End(0)),
+        "setpartition" => tapedevice.seek_partition(count as u32 + 1),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command))),
     }
-    
-    Ok(())
 }
