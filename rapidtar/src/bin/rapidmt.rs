@@ -60,6 +60,8 @@ fn main() -> io::Result<()> {
             "-" => io::copy(&mut io::stdin(), &mut io::BufWriter::with_capacity(blocksize.into_inner(), tapedevice)),
             name => io::copy(&mut fs::File::open(name).expect("Could not open target file to dump from"), &mut io::BufWriter::with_capacity(blocksize.into_inner(), tapedevice))
         }.and(Ok(())),
+        "weof" => { for _ in 0..count { tapedevice.write_filemark(true)? }; Ok(()) },
+        "eof" => { for _ in 0..count { tapedevice.write_filemark(true)? }; Ok(()) },
         _ => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command))),
     }
 }
