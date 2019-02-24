@@ -53,6 +53,10 @@ fn main() -> io::Result<()> {
             "-" => io::copy(&mut io::BufReader::with_capacity(1024*1024, tapedevice), &mut io::stdout()),
             name => io::copy(&mut io::BufReader::with_capacity(1024*1024, tapedevice), &mut fs::File::create(name).expect("Could not open target file to dump to"))
         }.and(Ok(())),
+        "write" => match filename.as_ref() {
+            "-" => io::copy(&mut io::stdin(), &mut io::BufWriter::with_capacity(1024*1024, tapedevice)),
+            name => io::copy(&mut fs::File::open(name).expect("Could not open target file to dump from"), &mut io::BufWriter::with_capacity(1024*1024, tapedevice))
+        }.and(Ok(())),
         _ => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command))),
     }
 }
