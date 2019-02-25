@@ -1,7 +1,7 @@
 use std::{path, time, io, cmp, fs};
 use std::io::Read;
 use std::str::FromStr;
-use crate::fs::{get_file_type, get_unix_mode};
+use crate::fs::{get_file_type, get_unix_mode, get_unix_owner, get_unix_group};
 use crate::normalize;
 use crate::tar::{ustar, pax};
 
@@ -85,22 +85,25 @@ pub struct TarHeader {
 }
 
 impl TarHeader {
-    pub fn abstract_header_for_file(archival_path: &path::Path, entry_metadata: &fs::Metadata) -> io::Result<TarHeader> {
+    pub fn abstract_header_for_file(archival_path: &path::Path, entry_metadata: &fs::Metadata, entry_path: &path::Path) -> io::Result<TarHeader> {
+        let (uid, owner) = get_unix_owner(entry_metadata, entry_path)?;
+        let (gid, group) = get_unix_group(entry_metadata, entry_path)?;
+
         Ok(TarHeader {
             path: Box::new(normalize::normalize(&archival_path)),
             unix_mode: get_unix_mode(entry_metadata)?,
 
             //TODO: Get plausible IDs for these.
-            unix_uid: 0,
-            unix_gid: 0,
+            unix_uid: uid,
+            unix_gid: gid,
             file_size: entry_metadata.len(),
             mtime: entry_metadata.modified().ok(),
 
             //TODO: All of these are placeholders.
             file_type: get_file_type(entry_metadata)?,
             symlink_path: None,
-            unix_uname: "root".to_string(),
-            unix_gname: "root".to_string(),
+            unix_uname: owner,
+            unix_gname: group,
             unix_devmajor: 0,
             unix_devminor: 0,
 

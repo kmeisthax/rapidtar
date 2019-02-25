@@ -44,3 +44,27 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
         Err(io::Error::new(io::ErrorKind::InvalidInput, "Metadata did not yield any valid file type for tarball"))
     }
 }
+
+/// Determine the UNIX owner ID and name for a given file.
+/// 
+/// # Platform considerations
+///
+/// This is the Unix version of the function. It reports the correct UID for the
+/// file.
+/// 
+/// TODO: It should also report a username, too...
+pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
+    Ok(metadata.uid(), "")
+}
+
+/// Determine the UNIX group ID and name for a given file.
+/// 
+/// # Platform considerations
+///
+/// This is the Unix version of the function. It reports the correct GID for the
+/// file.
+/// 
+/// TODO: It should also report a group name, too...
+pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
+    Ok(metadata.gid(), "")
+}

@@ -230,7 +230,7 @@ fn read_traverse(parallel_read_pool: &rayon::ThreadPool, tarparams: &TarParamete
 
         parallel_read_pool.spawn(move || {
             traverse::traverse(traversal_path, &move |iopath, tarpath, metadata, c: &SyncSender<tar::header::HeaderGenResult>| {
-                let tarheader = tar::header::TarHeader::abstract_header_for_file(tarpath, metadata)?;
+                let tarheader = tar::header::TarHeader::abstract_header_for_file(tarpath, metadata, iopath)?;
                 c.send(tar::header::headergen(iopath, tarpath, tarheader, format)?)?;
                 Ok(())
             }, child_sender, None).unwrap();

@@ -73,7 +73,7 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
     while let Some(zone) = iter.next() {
         if let Some(ident) = &zone.ident {
             let metadata = fs::symlink_metadata(&ident.canonical_path.as_ref())?;
-            let mut recovery_header = TarHeader::abstract_header_for_file(&ident.original_path, &metadata)?;
+            let mut recovery_header = TarHeader::abstract_header_for_file(&ident.original_path, &metadata, &ident.canonical_path)?;
             let offset;
             let mut concrete_tarheader;
             
