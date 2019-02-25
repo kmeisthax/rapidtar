@@ -6,7 +6,7 @@ use crate::blocking::BlockingWriter;
 use crate::concurrentbuf::ConcurrentWriteBuffer;
 use crate::tuning::Configuration;
 
-pub use crate::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
+pub use crate::fs::portable::{ArchivalSink, get_unix_mode, get_file_type, get_unix_owner, get_unix_group};
 
 /// Open a sink object for writing an archive (aka "tape").
 /// 
