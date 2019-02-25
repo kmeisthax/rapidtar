@@ -3,6 +3,7 @@ extern crate librapidarchive;
 
 use argparse::{ArgumentParser, Store};
 use std::{env, io, fs};
+use librapidarchive::units;
 use librapidarchive::fs::open_tape;
 
 fn main() -> io::Result<()> {
@@ -11,6 +12,7 @@ fn main() -> io::Result<()> {
     let mut command = "".to_string();
     let mut count = 1;
     let mut filename = "-".to_string();
+    let mut blocksize = units::DataSize::from(1024*1024);
     
     {
         let mut ap = ArgumentParser::new();
@@ -19,6 +21,7 @@ fn main() -> io::Result<()> {
         
         ap.refer(&mut tapename).add_option(&["-f"], Store, "The tape device to control (otherwise reads $TAPE)");
         ap.refer(&mut filename).add_option(&["-o"], Store, "A file to transfer data to or from. (Use - or don't specify for stdio)");
+        ap.refer(&mut blocksize).add_option(&["-bs"], Store, "The (recommended, not required) block size to use when reading or writing to or from the tape.");
         ap.refer(&mut command).add_argument("operation", Store, "The command to issue to the tape drive.");
         ap.refer(&mut count).add_argument("count", Store, "How many times to repeat the command. (e.g. fsf 2 = skip 2 files)");
         
@@ -32,43 +35,31 @@ fn main() -> io::Result<()> {
     let mut tapedevice = open_tape(tapename).expect("Could not access tape device");
     
     match command.as_ref() {
-        "fsf" => { //Skip to next file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count)).unwrap();
-        },
+        "fsf" => tapedevice.seek_filemarks(io::SeekFrom::Current(count)),
         "fsfm" => { //Position to append to next file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(-1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(-1))
         },
-        "bsf" => { //Skip to end of previous file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
-        },
+        "bsf" => tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)),
         "bsfm" => { //Position to overwrite previous file
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(1))
         },
         "asf" => { //Position to a specific file
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0)).unwrap();
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1)).unwrap();
+            tapedevice.seek_filemarks(io::SeekFrom::Start(0))?;
+            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))
         },
-        "rewind" => { //Position to start of tape (partition)
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0)).unwrap();
-        },
-        "eod" => { //Position to end of tape (partition)
-            tapedevice.seek_filemarks(io::SeekFrom::End(0)).unwrap();
-        },
-        "setpartition" => {
-            tapedevice.seek_partition(count as u32 + 1).unwrap();
-        },
-        "read" => {
-            match filename.as_ref() {
-                "-" => io::copy(&mut io::BufReader::with_capacity(1024*1024, tapedevice), &mut io::stdout()),
-                name => io::copy(&mut io::BufReader::with_capacity(1024*1024, tapedevice), &mut fs::File::create(name).expect("Could not open target file to dump to"))
-            }.expect("Could not dump tape file");
-        },
-        _ => {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command)));
-        }
+        "rewind" => tapedevice.seek_filemarks(io::SeekFrom::Start(0)),
+        "eod" => tapedevice.seek_filemarks(io::SeekFrom::End(0)),
+        "setpartition" => tapedevice.seek_partition(count as u32 + 1),
+        "read" => match filename.as_ref() {
+            "-" => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut io::stdout()),
+            name => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut fs::File::create(name).expect("Could not open target file to dump to"))
+        }.and(Ok(())),
+        "write" => match filename.as_ref() {
+            "-" => io::copy(&mut io::stdin(), &mut io::BufWriter::with_capacity(blocksize.into_inner(), tapedevice)),
+            name => io::copy(&mut fs::File::open(name).expect("Could not open target file to dump from"), &mut io::BufWriter::with_capacity(blocksize.into_inner(), tapedevice))
+        }.and(Ok(())),
+        _ => Err(io::Error::new(io::ErrorKind::InvalidInput, format!("Command {} not recognized", command))),
     }
-    
-    Ok(())
 }
