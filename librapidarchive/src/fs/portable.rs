@@ -197,7 +197,7 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
 ///
 /// This is the portable version of the function. It will always indicate that
 /// all files are owned by root.
-pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
+pub fn get_unix_owner(_metadata: &fs::Metadata, _path: &path::Path) -> io::Result<(u32, String)> {
     Ok((0, "root".to_string()))
 }
 
@@ -216,6 +216,6 @@ pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<
 ///
 /// This is the portable version of the function. It will always indicate that
 /// all files are owned by the root group. (Some systems call this 'wheel'.)
-pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
+pub fn get_unix_group(_metadata: &fs::Metadata, _path: &path::Path) -> io::Result<(u32, String)> {
     Ok((0, "root".to_string()))
 }
