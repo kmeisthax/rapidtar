@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
-use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA};
+use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA, ERROR_FILEMARK_DETECTED, ERROR_SETMARK_DETECTED, ERROR_NO_DATA_DETECTED};
 use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
@@ -25,7 +25,8 @@ pub struct WindowsTapeDevice<P = u64> where P: Sized + Clone {
     last_ident: PhantomData<P>,
     block_spill_buffer: Vec<u8>,
     block_spill_read_pos: usize,
-    last_command: TapeCommand
+    last_command: TapeCommand,
+    eof_condition: bool
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -78,7 +79,8 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
             last_ident: PhantomData,
             block_spill_buffer: Vec::with_capacity(1024),
             block_spill_read_pos: 0,
-            last_command: TapeCommand::NoneOfTheAbove
+            last_command: TapeCommand::NoneOfTheAbove,
+            eof_condition: false
         }
     }
 }
@@ -97,8 +99,9 @@ impl<P> Drop for WindowsTapeDevice<P> where P: Clone {
                 self.seek_filemarks(io::SeekFrom::Current(-1));
             },
             TapeCommand::Read => {
-                self.write_filemark(true);
-                self.seek_filemarks(io::SeekFrom::Current(1));
+                if !self.eof_condition {
+                    self.seek_filemarks(io::SeekFrom::Current(1));
+                }
             },
             _ => {}
         }
@@ -123,7 +126,13 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
                 let err = io::Error::last_os_error();
 
                 match err.raw_os_error() {
-                    Some(errcode) => if errcode == ERROR_MORE_DATA as i32 {
+                    Some(errcode) if errcode == ERROR_FILEMARK_DETECTED as i32 || errcode == ERROR_SETMARK_DETECTED as i32 || errcode == ERROR_NO_DATA_DETECTED as i32 => {
+                        self.eof_condition = true;
+
+                        unsafe { self.block_spill_buffer.set_len(0) };
+                        return Ok(());
+                    },
+                    Some(errcode) if errcode == ERROR_MORE_DATA as i32 => {
                         self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
 
                         res = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, &mut starting_partition, &mut starting_position_lo, &mut starting_position_hi) };
@@ -145,7 +154,8 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
                         }
 
                         continue;
-                    } else {
+                    },
+                    Some(errcode) => {
                         return Err(io::Error::from_raw_os_error(errcode as i32));
                     },
                     _ => return Err(err)
@@ -207,6 +217,10 @@ impl<P> io::Read for WindowsTapeDevice<P> where P: Clone {
             let remain = buf.len() - wrote;
 
             if self.block_spill_read_pos == 0 {
+                if self.eof_condition {
+                    break;
+                }
+
                 self.read_next_block()?;
 
                 if self.block_spill_buffer.len() <= remain {
@@ -251,6 +265,11 @@ impl<P> ArchivalSink<P> for WindowsTapeDevice<P> where P: Send + Clone {
 impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     fn read_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
         if self.block_spill_read_pos == 0 {
+            if self.eof_condition {
+                unsafe { buf.set_len(0) };
+                return Ok(());
+            }
+
             self.read_next_block()?;
         }
         
@@ -281,6 +300,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
 
     fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
         self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
 
         match pos {
             io::SeekFrom::Start(target) => {
@@ -323,6 +343,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     
     fn seek_setmarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
         self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
         
         match pos {
             io::SeekFrom::Start(target) => {
@@ -365,6 +386,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     
     fn seek_partition(&mut self, id: u32) -> io::Result<()> {
         self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
         
         let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
         
