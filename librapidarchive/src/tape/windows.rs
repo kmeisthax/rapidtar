@@ -13,11 +13,19 @@ use crate::tape::TapeDevice;
 use crate::spanning::RecoverableWrite;
 use crate::fs::ArchivalSink;
 
-pub struct WindowsTapeDevice<P = u64> where P: Sized {
+enum TapeCommand {
+    Write,
+    WriteFilemark,
+    Read,
+    NoneOfTheAbove
+}
+
+pub struct WindowsTapeDevice<P = u64> where P: Sized + Clone {
     tape_device: HANDLE,
     last_ident: PhantomData<P>,
     block_spill_buffer: Vec<u8>,
-    block_spill_read_pos: usize
+    block_spill_read_pos: usize,
+    last_command: TapeCommand
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -70,11 +78,34 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
             last_ident: PhantomData,
             block_spill_buffer: Vec::with_capacity(1024),
             block_spill_read_pos: 0,
+            last_command: TapeCommand::NoneOfTheAbove
         }
     }
 }
 
-impl<P> WindowsTapeDevice<P> {
+impl<P> Drop for WindowsTapeDevice<P> where P: Clone {
+    #[allow(unused_must_use)]
+    fn drop(&mut self) {
+        match self.last_command {
+            TapeCommand::Write => {
+                self.write_filemark(true);
+                self.write_filemark(true);
+                self.seek_filemarks(io::SeekFrom::Current(-1));
+            },
+            TapeCommand::WriteFilemark => {
+                self.write_filemark(true);
+                self.seek_filemarks(io::SeekFrom::Current(-1));
+            },
+            TapeCommand::Read => {
+                self.write_filemark(true);
+                self.seek_filemarks(io::SeekFrom::Current(1));
+            },
+            _ => {}
+        }
+    }
+}
+
+impl<P> WindowsTapeDevice<P> where P: Clone {
     /// Reads the next block off the tape directly from the Windows API into the
     /// spill buffer.
     fn read_next_block(&mut self) -> io::Result<()> {
@@ -82,6 +113,8 @@ impl<P> WindowsTapeDevice<P> {
         let mut starting_position_lo : DWORD = 0;
         let mut starting_position_hi : DWORD = 0;
         let mut res;
+
+        self.last_command = TapeCommand::Read;
 
         loop {
             let mut read_count : DWORD = 0;
@@ -134,6 +167,8 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut write_count : DWORD = 0;
         
+        self.last_command = TapeCommand::Write;
+
         if unsafe { fileapi::WriteFile(self.tape_device, buf.as_ptr() as LPCVOID, buf.len() as DWORD, &mut write_count, ptr::null_mut()) } == TRUE as BOOL {
             Ok(write_count as usize)
         } else {
@@ -157,7 +192,7 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     }
 }
 
-impl<P> io::Read for WindowsTapeDevice<P> {
+impl<P> io::Read for WindowsTapeDevice<P> where P: Clone {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         //Reading from tape on Windows is a little weird, because Windows really
         //wants to return one block at a time. If the block won't fit, it'll
@@ -234,6 +269,8 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
             false => FALSE as BOOL
         };
 
+        self.last_command = TapeCommand::WriteFilemark;
+
         let error = unsafe { winbase::WriteTapemark(self.tape_device, TAPE_FILEMARKS, 1, b_immediate) };
         if error != NO_ERROR {
             return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error writing filemark: {}", error)));
@@ -243,6 +280,8 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
 
     fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+
         match pos {
             io::SeekFrom::Start(target) => {
                 let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_REWIND, 0, 0, 0, FALSE as BOOL) };
@@ -283,6 +322,8 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
     
     fn seek_setmarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        
         match pos {
             io::SeekFrom::Start(target) => {
                 let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_REWIND, 0, 0, 0, FALSE as BOOL) };
@@ -323,6 +364,8 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
     
     fn seek_partition(&mut self, id: u32) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        
         let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
         
         if error != NO_ERROR {
