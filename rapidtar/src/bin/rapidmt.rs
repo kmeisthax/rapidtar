@@ -45,10 +45,7 @@ fn main() -> io::Result<()> {
             tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))?;
             tapedevice.seek_filemarks(io::SeekFrom::Current(1))
         },
-        "asf" => { //Position to a specific file
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0))?;
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))
-        },
+        "asf" => tapedevice.seek_filemarks(io::SeekFrom::Start(count as u64)),
         "rewind" => tapedevice.seek_filemarks(io::SeekFrom::Start(0)),
         "eod" => tapedevice.seek_filemarks(io::SeekFrom::End(0)),
         "setpartition" => tapedevice.seek_partition(count as u32 + 1),
