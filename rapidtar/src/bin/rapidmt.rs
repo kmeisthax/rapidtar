@@ -21,7 +21,7 @@ fn main() -> io::Result<()> {
         
         ap.refer(&mut tapename).add_option(&["-f"], Store, "The tape device to control (otherwise reads $TAPE)");
         ap.refer(&mut filename).add_option(&["-o"], Store, "A file to transfer data to or from. (Use - or don't specify for stdio)");
-        ap.refer(&mut blocksize).add_option(&["-bs"], Store, "The (recommended, not required) block size to use when reading or writing to or from the tape.");
+        ap.refer(&mut blocksize).add_option(&["--bs"], Store, "The (recommended, not required) block size to use when reading or writing to or from the tape.");
         ap.refer(&mut command).add_argument("operation", Store, "The command to issue to the tape drive.");
         ap.refer(&mut count).add_argument("count", Store, "How many times to repeat the command. (e.g. fsf 2 = skip 2 files)");
         
