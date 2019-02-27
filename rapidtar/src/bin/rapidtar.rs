@@ -113,7 +113,8 @@ impl Default for TarResult {
 
 fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
     eprintln!("Volume {} ran out of space and needs to be replaced.", tarresult.volume_count);
-        
+    eprintln!("Prepare the next volume and press enter when ready (or ? for more options)...");
+    
     while tarresult.cancelled == false {
         let mut response = String::new();
 
