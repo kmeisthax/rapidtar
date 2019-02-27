@@ -48,6 +48,9 @@ fn main() -> io::Result<()> {
         "asf" => tapedevice.seek_filemarks(io::SeekFrom::Start(count as u64)),
         "rewind" => tapedevice.seek_filemarks(io::SeekFrom::Start(0)),
         "eod" => tapedevice.seek_filemarks(io::SeekFrom::End(0)),
+        "fsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count)),
+        "bsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count * -1)),
+        "asr" => tapedevice.seek_blocks(io::SeekFrom::Start(count as u64)),
         "setpartition" => tapedevice.seek_partition(count as u32 + 1),
         "read" => match filename.as_ref() {
             "-" => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut io::stdout()),
