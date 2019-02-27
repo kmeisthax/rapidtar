@@ -21,6 +21,9 @@ pub trait TapeDevice : io::Write + io::Read {
     /// Seek by a number of blocks on the tape.
     fn seek_blocks(&mut self, pos: io::SeekFrom) -> io::Result<()>;
 
+    /// Get the current block ID
+    fn tell_blocks(&mut self) -> io::Result<u64>;
+
     /// Seek by a number of filemarks on the tape.
     /// 
     /// This function operates similarly to `seek`, but operates in units of

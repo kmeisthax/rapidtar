@@ -5,7 +5,7 @@ use winapi::um::{winbase, fileapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
 use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA, ERROR_FILEMARK_DETECTED, ERROR_SETMARK_DETECTED, ERROR_NO_DATA_DETECTED};
-use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_SPACE_RELATIVE_BLOCKS, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_SPACE_RELATIVE_BLOCKS, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -132,7 +132,7 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
                     Some(errcode) if errcode == ERROR_MORE_DATA as i32 => {
                         self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
 
-                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, 0xFFFFFFFF, 0xFFFFFFFF, FALSE as BOOL) };
+                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, ((-1 as i64) & 0xFFFFFFFF) as DWORD, ((-1 as i64) >> 32) as DWORD, FALSE as BOOL) };
                         if res != NO_ERROR {
                             return Err(io::Error::from_raw_os_error(res as i32));
                         }
@@ -317,6 +317,20 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
         }
 
         Ok(())
+    }
+
+    fn tell_blocks(&mut self) -> io::Result<u64> {
+        let mut part = 0;
+        let mut lo = 0;
+        let mut hi = 0;
+
+        let error = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, &mut part, &mut lo, &mut hi) };
+        
+        if error != NO_ERROR {
+            return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error getting block address: {}", error)));
+        }
+
+        Ok((hi as u64) << 32 | lo as u64)
     }
 
     fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {

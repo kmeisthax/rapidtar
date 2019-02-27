@@ -51,6 +51,7 @@ fn main() -> io::Result<()> {
         "fsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count)),
         "bsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count * -1)),
         "asr" => tapedevice.seek_blocks(io::SeekFrom::Start(count as u64)),
+        "tell" => { println!("{}", tapedevice.tell_blocks()?); Ok(()) },
         "setpartition" => tapedevice.seek_partition(count as u32 + 1),
         "read" => match filename.as_ref() {
             "-" => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut io::stdout()),
