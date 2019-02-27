@@ -18,6 +18,9 @@ pub trait TapeDevice : io::Write + io::Read {
     /// Write a filemark onto the tape.
     fn write_filemark(&mut self, blocking: bool) -> io::Result<()>;
 
+    /// Seek by a number of blocks on the tape.
+    fn seek_blocks(&mut self, pos: io::SeekFrom) -> io::Result<()>;
+
     /// Seek by a number of filemarks on the tape.
     /// 
     /// This function operates similarly to `seek`, but operates in units of
