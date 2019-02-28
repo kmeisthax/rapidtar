@@ -280,10 +280,15 @@ fn main() -> io::Result<()> {
                         close_tarball(tarball, &mut tarresult)?;
                         break;
                     },
-                    Some(ref e) if tarparams.spanning && e.kind() == io::ErrorKind::WriteZero => {
-                        tarball = match recover_proc(tarball, &mut tarparams, &mut tarresult) {
-                            Ok(tarball) => tarball,
-                            Err(_) => break
+                    Some(ref e) if e.kind() == io::ErrorKind::WriteZero => {
+                        if tarparams.spanning { 
+                            tarball = match recover_proc(tarball, &mut tarparams, &mut tarresult) {
+                                Ok(tarball) => tarball,
+                                Err(_) => break
+                            }
+                        } else {
+                            eprintln!("Ran out of space archiving file {:?}", last_error_entry.unwrap().original_path);
+                            break;
                         }
                     },
                     Some(e) => eprintln!("Error archiving file {:?}: {:?}", last_error_entry.unwrap().original_path, e)
