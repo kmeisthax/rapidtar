@@ -160,28 +160,37 @@ fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) 
 /// been committed to any number of volumes, and then return the last sink used
 /// in the queue.
 fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>> {
-    let mut tarball = old_tarball;
-    let mut lost_zones : Vec<spanning::DataZone<tar::recovery::RecoveryEntry>> = tarball.uncommitted_writes();
+    if tarresult.cancelled {
+        Ok(old_tarball)
+    } else {
+        let mut lost_zones : Vec<spanning::DataZone<tar::recovery::RecoveryEntry>> = old_tarball.uncommitted_writes();
+        let mut ret = None;
 
-    while tarresult.cancelled == false {
-        volume_exchange_cli(tarparams, tarresult)?;
+        drop(old_tarball);
 
-        if tarresult.cancelled == false {
-            tarball = open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning)?;
-            tarresult.volume_count += 1;
+        while tarresult.cancelled == false {
+            volume_exchange_cli(tarparams, tarresult)?;
 
-            match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
-                Ok(None) => break,
-                Ok(Some(zones)) => lost_zones = zones,
-                Err(e) => {
-                    eprintln!("Unknown error recovering torn writes: {}", e);
-                    return Err(e);
+            if tarresult.cancelled == false {
+                let mut tarball = open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning).expect("Could not open sink!");
+                tarresult.volume_count += 1;
+                
+                match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
+                    Ok(None) => {
+                        ret = Some(tarball);
+                        break
+                    },
+                    Ok(Some(zones)) => lost_zones = zones,
+                    Err(e) => {
+                        eprintln!("Unknown error recovering torn writes: {}", e);
+                        return Err(e);
+                    }
                 }
             }
         }
-    }
 
-    Ok(tarball)
+        ret.ok_or(io::Error::new(io::ErrorKind::Other, "Didn't exchange tarballs, even though we were supposed to."))
+    }
 }
 
 /// Serialize the files from a traversal channel into the tarball.
@@ -284,7 +293,10 @@ fn main() -> io::Result<()> {
                         if tarparams.spanning { 
                             tarball = match recover_proc(tarball, &mut tarparams, &mut tarresult) {
                                 Ok(tarball) => tarball,
-                                Err(_) => break
+                                Err(e) => {
+                                    eprintln!("Got error when trying to open next volume: {:?}", e);
+                                    break;
+                                }
                             }
                         } else {
                             eprintln!("Ran out of space archiving file {:?}", last_error_entry.unwrap().original_path);
