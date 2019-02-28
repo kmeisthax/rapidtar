@@ -1,7 +1,7 @@
 use std::{io, ptr, fmt, ffi, mem, cmp};
 use std::os::windows::ffi::OsStrExt;
 use std::marker::PhantomData;
-use winapi::um::{winbase, fileapi};
+use winapi::um::{winbase, fileapi, handleapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
 use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA, ERROR_FILEMARK_DETECTED, ERROR_SETMARK_DETECTED, ERROR_NO_DATA_DETECTED, ERROR_MEDIA_CHANGED};
@@ -159,6 +159,8 @@ impl<P> Drop for WindowsTapeDevice<P> where P: Clone {
             },
             _ => {}
         }
+
+        unsafe { handleapi::CloseHandle(self.tape_device) };
     }
 }
 
