@@ -10,6 +10,8 @@ mod pax;
 /// Code for generating tar headers of various kinds.
 pub mod header;
 
+pub mod label;
+
 /// Recovery code for handling surprise recoverable failures (e.g. volume full)
 /// necessary for spanning
 pub mod recovery;
