@@ -2,7 +2,7 @@ extern crate rayon;
 extern crate argparse;
 extern crate librapidarchive;
 
-use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, Collect};
+use argparse::{ArgumentParser, Store, StoreConst, StoreTrue, StoreOption, Collect};
 use std::{io, time, env};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use librapidarchive::{fs, tar, traverse, tuning, units, spanning};
@@ -33,6 +33,7 @@ struct TarParameter {
     pub totals: bool,
     pub spanning: bool,
     pub perf_tuning: tuning::Configuration,
+    pub label_title: Option<String>
 }
 
 impl Default for TarParameter {
@@ -49,7 +50,8 @@ impl Default for TarParameter {
             verbose: false,
             totals: false,
             spanning: false,
-            perf_tuning: tuning::Configuration::default()
+            perf_tuning: tuning::Configuration::default(),
+            label_title: None
         }
     }
 }
@@ -82,6 +84,7 @@ impl TarParameter {
             ap.refer(&mut tarparams.perf_tuning.blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
             ap.refer(&mut serial_buffer_limit_input).add_option(&["--serial_buffer_limit"], Store, "How many bytes to buffer on the tarball side of the operation");
             ap.refer(&mut tarparams.traversal_list).add_argument("file", Collect, "The files to archive");
+            ap.refer(&mut tarparams.label_title).add_option(&["-V", "--label"], StoreOption, "The volume label to create or expect");
             
             ap.parse_args_or_exit();
         }
@@ -111,6 +114,11 @@ impl Default for TarResult {
     }
 }
 
+/// Produces CLI to prompt a user to exchange a volume due to a previous volume
+/// becoming full.
+/// 
+/// The user is allowed to alter the parameters of the operation or cancel it
+/// outright. Check the parameters and result to determine how to proceed.
 fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
     eprintln!("Volume {} ran out of space and needs to be replaced.", tarresult.volume_count);
     eprintln!("Prepare the next volume and press enter when ready (or ? for more options)...");
@@ -151,6 +159,24 @@ fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) 
     Ok(())
 }
 
+/// Label a new tar volume.
+/// 
+/// This function is not obliged to write anything to the tarball if labeling it
+/// is not necessary. Clients needing a tar label should ensure that they are
+/// using a tar format that allows labeling and have a label parameter
+/// configured.
+fn label_proc<P>(tarball: &mut fs::ArchivalSink<P>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
+    let mut tarlabel = tar::label::TarLabel::default();
+
+    tarlabel.label = tarparams.label_title.clone();
+    tarlabel.volume_identifier = match tarparams.spanning {
+        true => Some(tarresult.volume_count),
+        false => None
+    };
+
+    tarball.write_all(&tar::label::labelgen(tarparams.format, &tarlabel)?)
+}
+
 /// Recover a partially-completed write operation.
 /// 
 /// CLI will be presented to the user to select a new volume to write to, and
@@ -174,6 +200,8 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
             if tarresult.cancelled == false {
                 let mut tarball = open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning).expect("Could not open sink!");
                 tarresult.volume_count += 1;
+
+                label_proc(tarball.deref_mut(), tarparams, tarresult)?;
                 
                 match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
                     Ok(None) => {
@@ -200,6 +228,8 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
 /// In the event of a write failure, this function will report the failed entry
 /// for possible error recovery.
 fn serialize_proc(tarball: &mut fs::ArchivalSink<tar::recovery::RecoveryEntry>, receiver: &Receiver<tar::header::HeaderGenResult>, failed_entry: &mut Option<tar::header::HeaderGenResult>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
+    label_proc(tarball, tarparams, tarresult)?;
+
     while let Ok(entry) = receiver.recv() {
         if tarparams.verbose {
             eprintln!("{:?}", entry.original_path);

@@ -313,7 +313,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
 /// On PAX format volumes, a `TarLabel` is interpreted as a global extended
 /// header (type flag 'g') and written as such.
 pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
-    let label_path = path::PathBuf::from(format!("/tmp/GlobalHead.{}.{}", tarlabel.nabla, tarlabel.volume_identifier));
+    let label_path = path::PathBuf::from(format!("/tmp/GlobalHead.{}.{}", tarlabel.nabla, tarlabel.volume_identifier.unwrap_or(0)));
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
 
     if let Some(ref label_str) = tarlabel.label {
