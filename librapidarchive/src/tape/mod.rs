@@ -3,6 +3,9 @@ use std::io;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(unix)]
+pub mod unix;
+
 pub trait TapeDevice : io::Write + io::Read {
     /// Read until the end of the current tape block.
     /// 
