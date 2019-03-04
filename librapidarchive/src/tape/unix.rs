@@ -8,6 +8,8 @@ use std::marker::PhantomData;
 use libc;
 
 use crate::tape::TapeDevice;
+use crate::fs::ArchivalSink;
+use crate::spanning::RecoverableWrite;
 
 const MTRESET: libc::c_short = 0;
 const MTFSF: libc::c_short = 1;
@@ -50,7 +52,7 @@ struct mtop {
 
 const MTIOCTOP: libc::c_ulong = (1 << 30) | (('m' as libc::c_ulong) << 16) | (1 << 8) | (mem::size_of::<mtop>() as libc::c_ulong);
 
-struct UnixTapeDevice<P = u64> {
+pub struct UnixTapeDevice<P = u64> {
     tape_device: RawFd,
     naninani: PhantomData<P>,
     block_spill_buffer: Vec<u8>,
@@ -172,6 +174,12 @@ impl<P> Read for UnixTapeDevice<P> {
     }
 }
 
+impl<P> RecoverableWrite<P> for UnixTapeDevice<P> where P: Clone {
+}
+
+impl<P> ArchivalSink<P> for UnixTapeDevice<P> where P: Send + Clone {
+}
+
 impl<P> TapeDevice for UnixTapeDevice<P> {
     fn read_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
         if self.block_spill_read_pos == 0 {
@@ -188,7 +196,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
         Ok(())
     }
     
-    fn write_filemark(&mut self, blocking: bool) -> io::Result<()> {
+    fn write_filemark(&mut self, _blocking: bool) -> io::Result<()> {
         let op = mtop {
             mt_op: MTWEOF,
             mt_count: 1
