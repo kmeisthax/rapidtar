@@ -24,6 +24,9 @@ rand = "0.6.4"
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [lib]
 name="librapidarchive"
 path="src/lib.rs"

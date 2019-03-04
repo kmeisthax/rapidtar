@@ -295,6 +295,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
         mem::swap(buf, &mut self.block_spill_buffer);
 
         self.block_spill_buffer = Vec::with_capacity(last_cap);
+        self.block_spill_read_pos = 0;
 
         Ok(())
     }

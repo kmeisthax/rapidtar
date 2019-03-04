@@ -1,4 +1,4 @@
-use std::{io, fs};
+use std::{io, fs, path};
 use std::os::unix::prelude::*;
 use crate::tar;
 
@@ -54,7 +54,7 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
 /// 
 /// TODO: It should also report a username, too...
 pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok(metadata.uid(), "")
+    Ok((metadata.uid(), "".to_string()))
 }
 
 /// Determine the UNIX group ID and name for a given file.
@@ -66,5 +66,5 @@ pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<
 /// 
 /// TODO: It should also report a group name, too...
 pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok(metadata.gid(), "")
+    Ok((metadata.gid(), "".to_string()))
 }

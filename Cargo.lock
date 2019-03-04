@@ -89,6 +89,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "librapidarchive"
 version = "0.2.0"
 dependencies = [
+ "libc 0.2.48 (registry+https://github.com/rust-lang/crates.io-index)",
  "num 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "pad 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
