@@ -45,12 +45,22 @@ const MTSETPART: libc::c_short = 33;
 const MTMKPART: libc::c_short = 34;
 
 #[repr(C)]
-struct mtop {
+pub struct mtop {
     mt_op: libc::c_short,
     mt_count: libc::c_int
 }
 
-const MTIOCTOP: libc::c_ulong = (1 << 30) | (('m' as libc::c_ulong) << 16) | (1 << 8) | (mem::size_of::<mtop>() as libc::c_ulong);
+ioctl!(write_ptr mt_ioctop with 'm', 1; mtop);
+
+fn conv_nix_error<T>(res: nix::Result<T>) -> io::Result<T> {
+    match res {
+        Err(nix::Error::Sys(errno)) => Err(io::Error::from_raw_os_error(errno as i32)),
+        Err(nix::Error::InvalidPath) => Err(io::Error::new(io::ErrorKind::Other, "Invalid Path")),
+        Err(nix::Error::InvalidUtf8) => Err(io::Error::new(io::ErrorKind::Other, "Invalid UTF8")),
+        Err(nix::Error::UnsupportedOperation) => Err(io::Error::new(io::ErrorKind::Other, "Unsupported Operation")),
+        Ok(e) => Ok(e)
+    }
+}
 
 pub struct UnixTapeDevice<P = u64> {
     tape_device: RawFd,
@@ -94,10 +104,7 @@ impl<P> UnixTapeDevice<P> {
                             mt_count: 1
                         };
 
-                        let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                        if res == -1 {
-                            return Err(io::Error::last_os_error());
-                        }
+                        conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
                     },
                     _ => return Err(err)
                 };
@@ -202,10 +209,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
             mt_count: 1
         };
 
-        let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-        if res == -1 {
-            return Err(io::Error::last_os_error());
-        }
+        conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
         Ok(())
     }
@@ -218,10 +222,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::Current(pos) => {
                 let op = mtop {
@@ -233,10 +234,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::End(pos) => {
                 let mut op = mtop {
@@ -244,18 +242,12 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let mut res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
                 op.mt_op = MTBSR;
                 op.mt_count = pos as i32;
 
-                res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             }
         }
 
@@ -274,18 +266,12 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: 1
                 };
 
-                let mut res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
                 op.mt_op = MTFSF;
                 op.mt_count = pos as i32;
 
-                res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::Current(pos) => {
                 let op = mtop {
@@ -297,10 +283,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::End(pos) => { //wait how do we even do this
                 let mut op = mtop {
@@ -308,18 +291,12 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let mut res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
                 op.mt_op = MTBSF;
                 op.mt_count = pos as i32;
 
-                res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             }
         }
 
@@ -334,18 +311,12 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: 1
                 };
 
-                let mut res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
                 op.mt_op = MTFSS;
                 op.mt_count = pos as i32;
 
-                res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::Current(pos) => {
                 let op = mtop {
@@ -357,10 +328,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             },
             io::SeekFrom::End(pos) => { //wait how do we even do this
                 let mut op = mtop {
@@ -368,18 +336,12 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
                     mt_count: pos as i32
                 };
 
-                let mut res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
                 op.mt_op = MTBSS;
                 op.mt_count = pos as i32;
 
-                res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-                if res == -1 {
-                    return Err(io::Error::last_os_error());
-                }
+                conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
             }
         }
 
@@ -392,10 +354,7 @@ impl<P> TapeDevice for UnixTapeDevice<P> {
             mt_count: id as i32
         };
 
-        let res = unsafe { libc::ioctl(self.tape_device, MTIOCTOP, &op) };
-        if res == -1 {
-            return Err(io::Error::last_os_error());
-        }
+        conv_nix_error(unsafe { mt_ioctop(self.tape_device, &op) })?;
 
         Ok(())
     }

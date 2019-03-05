@@ -26,6 +26,7 @@ winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+nix = "0.10.0"
 
 [lib]
 name="librapidarchive"

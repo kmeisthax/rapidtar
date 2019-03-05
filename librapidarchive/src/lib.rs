@@ -6,6 +6,10 @@ extern crate num_traits;
 #[cfg(windows)]
 extern crate winapi;
 
+#[macro_use]
+#[cfg(unix)]
+extern crate nix;
+
 /// tar archive format definitions and serializers.
 pub mod tar;
 
