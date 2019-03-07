@@ -197,22 +197,31 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
         while tarresult.cancelled == false {
             volume_exchange_cli(tarparams, tarresult)?;
 
-            if tarresult.cancelled == false {
-                let mut tarball = open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning).expect("Could not open sink!");
-                tarresult.volume_count += 1;
+            if tarresult.cancelled {
+                return Err(io::Error::new(io::ErrorKind::Other, "User cancelled the operation"));
+            }
 
-                label_proc(tarball.deref_mut(), tarparams, tarresult)?;
-                
-                match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
-                    Ok(None) => {
-                        ret = Some(tarball);
-                        break
-                    },
-                    Ok(Some(zones)) => lost_zones = zones,
-                    Err(e) => {
-                        eprintln!("Unknown error recovering torn writes: {}", e);
-                        return Err(e);
-                    }
+            let mut tarball = match open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning) {
+                Ok(tarball) => tarball,
+                Err(e) => {
+                    eprintln!("Error trying to open new volume: {}", e);
+                    continue;
+                }
+            };
+            
+            tarresult.volume_count += 1;
+
+            label_proc(tarball.deref_mut(), tarparams, tarresult)?;
+            
+            match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
+                Ok(None) => {
+                    ret = Some(tarball);
+                    break
+                },
+                Ok(Some(zones)) => lost_zones = zones,
+                Err(e) => {
+                    eprintln!("Unknown error recovering torn writes: {}", e);
+                    return Err(e);
                 }
             }
         }
