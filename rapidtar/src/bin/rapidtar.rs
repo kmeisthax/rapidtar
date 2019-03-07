@@ -114,6 +114,15 @@ impl Default for TarResult {
     }
 }
 
+fn totals_cli(tarresult: &TarResult) {
+    let write_time = tarresult.start_instant.elapsed();
+    let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
+    let rate = units::DataSize::from(tarresult.tarball_size.clone().into_inner() as f64 / float_secs);
+    let displayable_time = units::HRDuration::from(write_time);
+    
+    eprintln!("Wrote {} in {} ({}/s)", tarresult.tarball_size, displayable_time, rate);
+}
+
 /// Produces CLI to prompt a user to exchange a volume due to a previous volume
 /// becoming full.
 /// 
@@ -193,6 +202,10 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
         let mut ret = None;
 
         drop(old_tarball);
+        
+        if tarparams.totals {
+            totals_cli(tarresult);
+        }
 
         while tarresult.cancelled == false {
             volume_exchange_cli(tarparams, tarresult)?;
@@ -208,7 +221,7 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
                     continue;
                 }
             };
-            
+
             tarresult.volume_count += 1;
 
             label_proc(tarball.deref_mut(), tarparams, tarresult)?;
@@ -347,12 +360,7 @@ fn main() -> io::Result<()> {
             }
             
             if tarparams.totals {
-                let write_time = tarresult.start_instant.elapsed();
-                let float_secs = (write_time.as_secs() as f64) + (write_time.subsec_nanos() as f64) / (1000 * 1000 * 1000) as f64;
-                let rate = units::DataSize::from(tarresult.tarball_size.clone().into_inner() as f64 / float_secs);
-                let displayable_time = units::HRDuration::from(write_time);
-                
-                eprintln!("Wrote {} in {} ({}/s)", tarresult.tarball_size, displayable_time, rate);
+                totals_cli(&tarresult);
             }
 
             Ok(())
