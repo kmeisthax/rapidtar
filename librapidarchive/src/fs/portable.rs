@@ -7,12 +7,22 @@ use crate::tuning::Configuration;
 /// 
 /// TODO: The **moment** Rust gets the ability to handle multiple traits in a
 /// single trait object, delete this arbitrary supertrait immediately.
+/// 
+/// TODO: wait no now this supertrait does downcasts because Box won't
 pub trait ArchivalSink<I>: Send + io::Write + spanning::RecoverableWrite<I> {
-    
+    fn downcast_seek(&mut self) -> Option<&mut dyn io::Seek> {
+        None
+    }
+
+    fn downcast_tapedevice(&mut self) -> Option<&mut dyn tape::TapeDevice> {
+        None
+    }
 }
 
 impl<I> ArchivalSink<I> for fs::File {
-    
+    fn downcast_seek(&mut self) -> Option<&mut dyn io::Seek> {
+        Some(self)
+    }
 }
 
 /// Open a sink object for writing an archive (aka "tape").

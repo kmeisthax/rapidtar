@@ -185,6 +185,9 @@ impl<P> RecoverableWrite<P> for UnixTapeDevice<P> where P: Clone {
 }
 
 impl<P> ArchivalSink<P> for UnixTapeDevice<P> where P: Send + Clone {
+    fn downcast_tapedevice(&mut self) -> Option<&mut dyn TapeDevice> {
+        Some(self)
+    }
 }
 
 impl<P> TapeDevice for UnixTapeDevice<P> {
