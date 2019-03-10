@@ -1,8 +1,53 @@
-use std::{io, fs};
+use std::{io, fs, path, ffi};
 use std::os::unix::prelude::*;
-use crate::tar;
+use crate::{tar, tape};
+use crate::tape::unix::UnixTapeDevice;
+use crate::blocking::BlockingWriter;
+use crate::concurrentbuf::ConcurrentWriteBuffer;
+use crate::tuning::Configuration;
 
-pub use crate::fs::portable::{ArchivalSink, open_sink, open_tape};
+pub use crate::fs::portable::ArchivalSink;
+
+/// Open a sink object for writing an archive (aka "tape").
+/// 
+/// For more information, please see `rapidtar::fs::portable::open_sink`.
+/// 
+/// # Platform considerations
+/// 
+/// This is the Windows version of the function. It supports writes to files
+/// and tape devices.
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
+    let metadata = fs::metadata(outfile.clone())?;
+    
+    //TODO: Better tape detection. This assumes all character devices are tapes.
+    if metadata.file_type().is_char_device() {
+        match UnixTapeDevice::open_device(&ffi::OsString::from(outfile)) {
+            Ok(tape) => {
+                return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)));
+            },
+            Err(e) => Err(e)
+        }
+    } else {
+        let file = fs::File::create(outfile.as_ref())?;
+        
+        Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
+    }
+}
+
+/// Open an object for total control of a tape device.
+///
+/// # Platform considerations
+/// 
+/// This is the Windows version of the function. It implements tape control for
+/// all tape devices in the `\\.\TAPEn` namespace.
+pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
+    match UnixTapeDevice::<u64>::open_device(&ffi::OsString::from(tapedev.clone())) {
+        Ok(tape) => {
+            return Ok(Box::new(tape));
+        }
+        Err(e) => Err(e)
+    }
+}
 
 /// Given a directory entry, produce valid Unix mode bits for it.
 /// 
@@ -54,7 +99,7 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
 /// 
 /// TODO: It should also report a username, too...
 pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok(metadata.uid(), "")
+    Ok((metadata.uid(), "".to_string()))
 }
 
 /// Determine the UNIX group ID and name for a given file.
@@ -66,5 +111,5 @@ pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<
 /// 
 /// TODO: It should also report a group name, too...
 pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok(metadata.gid(), "")
+    Ok((metadata.gid(), "".to_string()))
 }

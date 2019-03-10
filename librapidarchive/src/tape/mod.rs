@@ -3,6 +3,9 @@ use std::io;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(unix)]
+pub mod unix;
+
 pub trait TapeDevice : io::Write + io::Read {
     /// Read until the end of the current tape block.
     /// 
@@ -17,6 +20,12 @@ pub trait TapeDevice : io::Write + io::Read {
 
     /// Write a filemark onto the tape.
     fn write_filemark(&mut self, blocking: bool) -> io::Result<()>;
+
+    /// Seek by a number of blocks on the tape.
+    fn seek_blocks(&mut self, pos: io::SeekFrom) -> io::Result<()>;
+
+    /// Get the current block ID
+    fn tell_blocks(&mut self) -> io::Result<u64>;
 
     /// Seek by a number of filemarks on the tape.
     /// 

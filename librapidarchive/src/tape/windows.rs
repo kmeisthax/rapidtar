@@ -1,11 +1,11 @@
 use std::{io, ptr, fmt, ffi, mem, cmp};
 use std::os::windows::ffi::OsStrExt;
 use std::marker::PhantomData;
-use winapi::um::{winbase, fileapi};
+use winapi::um::{winbase, fileapi, handleapi};
 use winapi::shared::ntdef::{TRUE, FALSE};
 use winapi::shared::minwindef::{BOOL, LPVOID, LPCVOID, DWORD};
-use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA};
-use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
+use winapi::shared::winerror::{NO_ERROR, ERROR_END_OF_MEDIA, ERROR_MORE_DATA, ERROR_FILEMARK_DETECTED, ERROR_SETMARK_DETECTED, ERROR_NO_DATA_DETECTED, ERROR_MEDIA_CHANGED};
+use winapi::um::winnt::{WCHAR, HANDLE, GENERIC_READ, GENERIC_WRITE, TAPE_LOGICAL_POSITION, TAPE_SPACE_END_OF_DATA, TAPE_SPACE_FILEMARKS, TAPE_SPACE_SETMARKS, TAPE_LOGICAL_BLOCK, TAPE_SPACE_RELATIVE_BLOCKS, TAPE_REWIND, TAPE_FILEMARKS, TAPE_SET_MEDIA_PARAMETERS};
 use winapi::um::fileapi::{OPEN_EXISTING};
 use winapi::um::handleapi::INVALID_HANDLE_VALUE;
 use num;
@@ -13,11 +13,20 @@ use crate::tape::TapeDevice;
 use crate::spanning::RecoverableWrite;
 use crate::fs::ArchivalSink;
 
-pub struct WindowsTapeDevice<P = u64> where P: Sized {
+enum TapeCommand {
+    Write,
+    WriteFilemark,
+    Read,
+    NoneOfTheAbove
+}
+
+pub struct WindowsTapeDevice<P = u64> where P: Sized + Clone {
     tape_device: HANDLE,
     last_ident: PhantomData<P>,
     block_spill_buffer: Vec<u8>,
-    block_spill_read_pos: usize
+    block_spill_read_pos: usize,
+    last_command: TapeCommand,
+    eof_condition: bool
 }
 
 /// Absolutely not safe in the general case, but Windows handles are definitely
@@ -70,53 +79,104 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
             last_ident: PhantomData,
             block_spill_buffer: Vec::with_capacity(1024),
             block_spill_read_pos: 0,
+            last_command: TapeCommand::NoneOfTheAbove,
+            eof_condition: false
+        }
+    }
+
+    /// Given an error occured during seeking, determine if it can be handled or
+    /// not, and if so, handle it transparently.
+    /// 
+    /// If the error was handled, returns `Ok`, otherwise returns the original
+    /// error.
+    fn handle_seek_error(&mut self, err: io::Error) -> io::Result<()> {
+        match err.raw_os_error() {
+            Some(errcode) if errcode == ERROR_FILEMARK_DETECTED as i32 => Ok(()),
+            Some(errcode) if errcode == ERROR_SETMARK_DETECTED as i32 => Ok(()),
+            Some(errcode) if errcode == ERROR_NO_DATA_DETECTED as i32 => Ok(()),
+            Some(errcode) if errcode == ERROR_MEDIA_CHANGED as i32 => Ok(()),
+            _ => Err(err)
+        }
+    }
+
+    fn handle_tell_error(&mut self, err: io::Error) -> io::Result<()> {
+        self.handle_seek_error(err)
+    }
+
+    /// Given an error occured during reading, determine if it can be handled or
+    /// not, and if so, handle it transparently.
+    /// 
+    /// If the error was handled, returns `Ok`, otherwise returns the original
+    /// error.
+    /// 
+    /// # Error handling behavior
+    /// 
+    /// If the error was an end-of-file, end-of-set, or end-of-data condition,
+    /// then the tape device is marked as EOF to prohibit future reads.
+    fn handle_read_error(&mut self, err: io::Error) -> io::Result<()> {
+        match err.raw_os_error() {
+            Some(errcode) if errcode == ERROR_FILEMARK_DETECTED as i32 || errcode == ERROR_SETMARK_DETECTED as i32 || errcode == ERROR_NO_DATA_DETECTED as i32 => {
+                self.eof_condition = true;
+
+                unsafe { self.block_spill_buffer.set_len(0) };
+                Ok(())
+            },
+            Some(errcode) if errcode == ERROR_MORE_DATA as i32 || errcode == ERROR_MEDIA_CHANGED as i32 => {
+                self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
+
+                let res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, ((-1 as i64) & 0xFFFFFFFF) as DWORD, ((-1 as i64) >> 32) as DWORD, FALSE as BOOL) };
+                if res != NO_ERROR {
+                    return self.handle_seek_error(io::Error::from_raw_os_error(res as i32));
+                }
+                
+                Ok(())
+            },
+            Some(errcode) => {
+                return Err(io::Error::from_raw_os_error(errcode as i32));
+            },
+            _ => return Err(err)
         }
     }
 }
 
-impl<P> WindowsTapeDevice<P> {
+impl<P> Drop for WindowsTapeDevice<P> where P: Clone {
+    #[allow(unused_must_use)]
+    fn drop(&mut self) {
+        match self.last_command {
+            TapeCommand::Write => {
+                self.write_filemark(true);
+                self.write_filemark(true);
+                self.seek_filemarks(io::SeekFrom::Current(-1));
+            },
+            TapeCommand::WriteFilemark => {
+                self.write_filemark(true);
+                self.seek_filemarks(io::SeekFrom::Current(-1));
+            },
+            TapeCommand::Read => {
+                if !self.eof_condition {
+                    self.seek_filemarks(io::SeekFrom::Current(1));
+                }
+            },
+            _ => {}
+        }
+
+        unsafe { handleapi::CloseHandle(self.tape_device) };
+    }
+}
+
+impl<P> WindowsTapeDevice<P> where P: Clone {
     /// Reads the next block off the tape directly from the Windows API into the
     /// spill buffer.
     fn read_next_block(&mut self) -> io::Result<()> {
-        let mut starting_partition : DWORD = 0;
-        let mut starting_position_lo : DWORD = 0;
-        let mut starting_position_hi : DWORD = 0;
-        let mut res;
+        self.last_command = TapeCommand::Read;
 
-        loop {
+        while !self.eof_condition {
             let mut read_count : DWORD = 0;
 
             if unsafe { fileapi::ReadFile(self.tape_device, self.block_spill_buffer.as_mut_ptr() as LPVOID, self.block_spill_buffer.capacity() as DWORD, &mut read_count, ptr::null_mut()) } != TRUE as BOOL {
                 let err = io::Error::last_os_error();
-
-                match err.raw_os_error() {
-                    Some(errcode) => if errcode == ERROR_MORE_DATA as i32 {
-                        self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
-
-                        res = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, &mut starting_partition, &mut starting_position_lo, &mut starting_position_hi) };
-                        if res != NO_ERROR {
-                            return Err(io::Error::from_raw_os_error(res as i32));
-                        }
-
-                        match starting_position_lo.overflowing_add(1) {
-                            (new_lo, false) => starting_position_lo = new_lo,
-                            (new_lo, true) => {
-                                starting_position_lo = new_lo;
-                                starting_position_hi = starting_position_hi.saturating_add(1);
-                            }
-                        }
-
-                        res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, starting_partition, starting_position_lo, starting_position_hi, FALSE as BOOL) };
-                        if res != NO_ERROR {
-                            return Err(io::Error::from_raw_os_error(res as i32));
-                        }
-
-                        continue;
-                    } else {
-                        return Err(io::Error::from_raw_os_error(errcode as i32));
-                    },
-                    _ => return Err(err)
-                };
+                
+                self.handle_read_error(err)?;
             }
             
             let bounded_read_count = cmp::min(read_count as usize, self.block_spill_buffer.capacity());
@@ -134,6 +194,8 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut write_count : DWORD = 0;
         
+        self.last_command = TapeCommand::Write;
+
         if unsafe { fileapi::WriteFile(self.tape_device, buf.as_ptr() as LPCVOID, buf.len() as DWORD, &mut write_count, ptr::null_mut()) } == TRUE as BOOL {
             Ok(write_count as usize)
         } else {
@@ -157,7 +219,7 @@ impl<P> io::Write for WindowsTapeDevice<P> where P: Clone {
     }
 }
 
-impl<P> io::Read for WindowsTapeDevice<P> {
+impl<P> io::Read for WindowsTapeDevice<P> where P: Clone {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         //Reading from tape on Windows is a little weird, because Windows really
         //wants to return one block at a time. If the block won't fit, it'll
@@ -172,6 +234,10 @@ impl<P> io::Read for WindowsTapeDevice<P> {
             let remain = buf.len() - wrote;
 
             if self.block_spill_read_pos == 0 {
+                if self.eof_condition {
+                    break;
+                }
+
                 self.read_next_block()?;
 
                 if self.block_spill_buffer.len() <= remain {
@@ -216,6 +282,11 @@ impl<P> ArchivalSink<P> for WindowsTapeDevice<P> where P: Send + Clone {
 impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     fn read_block(&mut self, buf: &mut Vec<u8>) -> io::Result<()> {
         if self.block_spill_read_pos == 0 {
+            if self.eof_condition {
+                unsafe { buf.set_len(0) };
+                return Ok(());
+            }
+
             self.read_next_block()?;
         }
         
@@ -224,6 +295,7 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
         mem::swap(buf, &mut self.block_spill_buffer);
 
         self.block_spill_buffer = Vec::with_capacity(last_cap);
+        self.block_spill_read_pos = 0;
 
         Ok(())
     }
@@ -234,47 +306,93 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
             false => FALSE as BOOL
         };
 
+        self.last_command = TapeCommand::WriteFilemark;
+
         let error = unsafe { winbase::WriteTapemark(self.tape_device, TAPE_FILEMARKS, 1, b_immediate) };
         if error != NO_ERROR {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error writing filemark: {}", error)));
+            self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
         }
 
         Ok(())
     }
 
-    fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+    fn seek_blocks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
+
         match pos {
             io::SeekFrom::Start(target) => {
-                let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_REWIND, 0, 0, 0, FALSE as BOOL) };
-                
+                let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding to end of tape: {}", error)));
-                }
-                
-                error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_FILEMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
-                if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             },
             io::SeekFrom::Current(target) => {
-                let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_FILEMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
+                let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             },
             io::SeekFrom::End(target) => {
                 let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_END_OF_DATA, 0, 0, 0, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding to end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
+                }
+                
+                error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, ((target * -1) & 0xFFFFFFFF) as DWORD, ((target * -1) >> 32) as DWORD, FALSE as BOOL) };
+                if error != NO_ERROR {
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn tell_blocks(&mut self) -> io::Result<u64> {
+        let mut part = 0;
+        let mut lo = 0;
+        let mut hi = 0;
+
+        let error = unsafe { winbase::GetTapePosition(self.tape_device, TAPE_LOGICAL_POSITION, &mut part, &mut lo, &mut hi) };
+        if error != NO_ERROR {
+            self.handle_tell_error(io::Error::from_raw_os_error(error as i32))?;
+        }
+
+        Ok((hi as u64) << 32 | lo as u64)
+    }
+
+    fn seek_filemarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
+
+        match pos {
+            io::SeekFrom::Start(target) => {
+                let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_REWIND, 0, 0, 0, FALSE as BOOL) };
+                if error != NO_ERROR {
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
                 
                 error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_FILEMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
+                }
+            },
+            io::SeekFrom::Current(target) => {
+                let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_FILEMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
+                if error != NO_ERROR {
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
+                }
+            },
+            io::SeekFrom::End(target) => {
+                let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_END_OF_DATA, 0, 0, 0, FALSE as BOOL) };
+                if error != NO_ERROR {
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
+                }
+                
+                error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_FILEMARKS, 0, ((target * -1) & 0xFFFFFFFF) as DWORD, ((target * -1) >> 32) as DWORD, FALSE as BOOL) };
+                if error != NO_ERROR {
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             }
         }
@@ -283,38 +401,36 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
     
     fn seek_setmarks(&mut self, pos: io::SeekFrom) -> io::Result<()> {
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
+        
         match pos {
             io::SeekFrom::Start(target) => {
                 let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_REWIND, 0, 0, 0, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding to end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
                 
                 error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_SETMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             },
             io::SeekFrom::Current(target) => {
                 let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_SETMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             },
             io::SeekFrom::End(target) => {
                 let mut error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_END_OF_DATA, 0, 0, 0, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding to end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
                 
                 error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_SETMARKS, 0, (target & 0xFFFFFFFF) as DWORD, (target >> 32) as DWORD, FALSE as BOOL) };
-                
                 if error != NO_ERROR {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error winding backwards from end of tape: {}", error)));
+                    self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
                 }
             }
         }
@@ -323,10 +439,12 @@ impl<P> TapeDevice for WindowsTapeDevice<P> where P: Clone {
     }
     
     fn seek_partition(&mut self, id: u32) -> io::Result<()> {
-        let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
+        self.last_command = TapeCommand::NoneOfTheAbove;
+        self.eof_condition = false;
         
+        let error = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_LOGICAL_BLOCK, id as DWORD, 0, 0, FALSE as BOOL) };
         if error != NO_ERROR {
-            return Err(io::Error::new(io::ErrorKind::Other, format!("Unspecified NT tape device error changing partitions: {}", error)));
+            self.handle_seek_error(io::Error::from_raw_os_error(error as i32))?;
         }
         
         Ok(())

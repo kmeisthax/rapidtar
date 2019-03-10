@@ -21,7 +21,7 @@ fn main() -> io::Result<()> {
         
         ap.refer(&mut tapename).add_option(&["-f"], Store, "The tape device to control (otherwise reads $TAPE)");
         ap.refer(&mut filename).add_option(&["-o"], Store, "A file to transfer data to or from. (Use - or don't specify for stdio)");
-        ap.refer(&mut blocksize).add_option(&["-bs"], Store, "The (recommended, not required) block size to use when reading or writing to or from the tape.");
+        ap.refer(&mut blocksize).add_option(&["--bs"], Store, "The (recommended, not required) block size to use when reading or writing to or from the tape.");
         ap.refer(&mut command).add_argument("operation", Store, "The command to issue to the tape drive.");
         ap.refer(&mut count).add_argument("count", Store, "How many times to repeat the command. (e.g. fsf 2 = skip 2 files)");
         
@@ -45,13 +45,15 @@ fn main() -> io::Result<()> {
             tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))?;
             tapedevice.seek_filemarks(io::SeekFrom::Current(1))
         },
-        "asf" => { //Position to a specific file
-            tapedevice.seek_filemarks(io::SeekFrom::Start(0))?;
-            tapedevice.seek_filemarks(io::SeekFrom::Current(count * -1))
-        },
+        "asf" => tapedevice.seek_filemarks(io::SeekFrom::Start(count as u64)),
         "rewind" => tapedevice.seek_filemarks(io::SeekFrom::Start(0)),
         "eod" => tapedevice.seek_filemarks(io::SeekFrom::End(0)),
+        "fsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count)),
+        "bsr" => tapedevice.seek_blocks(io::SeekFrom::Current(count * -1)),
+        "asr" => tapedevice.seek_blocks(io::SeekFrom::Start(count as u64)),
+        "tell" => { println!("{}", tapedevice.tell_blocks()?); Ok(()) },
         "setpartition" => tapedevice.seek_partition(count as u32 + 1),
+        "weof" => { for _ in 0..count { tapedevice.write_filemark(true)? }; Ok(()) },
         "read" => match filename.as_ref() {
             "-" => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut io::stdout()),
             name => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut fs::File::create(name).expect("Could not open target file to dump to"))

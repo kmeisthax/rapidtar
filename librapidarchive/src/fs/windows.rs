@@ -1,5 +1,6 @@
 use std::{io, fs, ffi, path, thread, time};
 use std::cmp::PartialEq;
+use winapi::shared::winerror::{ERROR_MEDIA_CHANGED};
 use crate::tape;
 use crate::tape::windows::WindowsTapeDevice;
 use crate::blocking::BlockingWriter;
@@ -34,31 +35,26 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
         }
     }
     
-    //Windows does this fun thing where it pretends tape devices don't exist
-    //sometimes, so we ignore up to 5 file/path not found errors before actually
-    //forwarding one along
+    //Windows does this fun thing where tape devices throw an error if you've
+    //changed the media out, so we absorb up to five of these spurious errors
+    //when opening up a new tape
     let mut notfound_count = 0;
     
     if is_tape {
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
-                Ok(tape) => {
-                    return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)));
-                },
+                Ok(tape) => return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor))),
                 Err(e) => {
                     match e.raw_os_error() {
-                        Some(errcode) => {
-                            if errcode == 2 || errcode == 3 {
-                                notfound_count += 1;
-
-                                if notfound_count > 5 {
-                                    return Err(e);
-                                }
-                            } else {
-                                return Err(e);
-                            }
+                        Some(errcode) if errcode == ERROR_MEDIA_CHANGED as i32 => {
+                            notfound_count += 1;
                         },
+                        Some(_) => return Err(e),
                         None => return Err(e)
+                    }
+
+                    if notfound_count > 5 {
+                        return Err(e);
                     }
                 }
             }

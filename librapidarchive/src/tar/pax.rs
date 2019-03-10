@@ -3,6 +3,7 @@ use crate::tar::ustar;
 use crate::tar::ustar::{format_tar_numeral, format_tar_string};
 use crate::tar::gnu::{format_gnu_numeral, format_gnu_time};
 use crate::tar::header::{TarHeader, TarFileType};
+use crate::tar::label::TarLabel;
 use crate::tar::canonicalized_tar_path;
 
 /// Format a key-value pair in pax format.
@@ -130,6 +131,29 @@ pub fn format_pax_legacy_filename(canonical_path: &String) -> io::Result<(Vec<u8
     return Ok((unixpart, extpart, true));
 }
 
+/// Given a path to an archived file, compute the fallback path for that file,
+/// such that it's extended header will be unarchived to a neighboring directory
+/// when processed by a non-PAX tar implementation.
+pub fn compute_fallback_path<P: AsRef<path::Path>>(path: &P, filetype: TarFileType) -> io::Result<(Vec<u8>, Vec<u8>, bool)> {
+    let pathref = path.as_ref();
+    let mut component_count = 0;
+    for _ in pathref.components() {
+        component_count += 1
+    }
+
+    let mut pax_prefixed_path : path::PathBuf = pathref.to_path_buf();
+    
+    if component_count > 1 {
+        pax_prefixed_path = pax_prefixed_path.with_file_name("PaxHeaders");
+        pax_prefixed_path.push(pathref.file_name().unwrap_or(&ffi::OsString::from(".")));
+    } else {
+        pax_prefixed_path = path::PathBuf::from(r"./PaxHeaders");
+        pax_prefixed_path.push(pathref.to_path_buf());
+    }
+    
+    format_pax_legacy_filename(&canonicalized_tar_path(&pax_prefixed_path, filetype))
+}
+
 /// Given a directory entry, form a tar header for that given entry.
 /// 
 /// Tarball header will be written in PAX header format. This format places no
@@ -228,22 +252,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     
     //sup dawg, I heard u like headers so we put a header on your header
     if extended_stream.len() > 0 {
-        let mut component_count = 0;
-        for _ in tarheader.path.components() {
-            component_count += 1
-        }
-        
-        let mut pax_prefixed_path : path::PathBuf = tarheader.path.clone().to_path_buf();
-        
-        if component_count > 1 {
-            pax_prefixed_path = pax_prefixed_path.with_file_name("PaxHeaders");
-            pax_prefixed_path.push(tarheader.path.file_name().unwrap_or(&ffi::OsString::from(".")));
-        } else {
-            pax_prefixed_path = path::PathBuf::from(r"./PaxHeaders");
-            pax_prefixed_path.push(tarheader.path.to_path_buf());
-        }
-        
-        let (pax_relapath_unix, pax_relapath_extended, _) = format_pax_legacy_filename(&canonicalized_tar_path(&pax_prefixed_path, tarheader.file_type))?;
+        let (pax_relapath_unix, pax_relapath_extended, _) = compute_fallback_path(&tarheader.path.as_ref(), tarheader.file_type)?;
         
         //TODO: What if the extended header exceeds 8GB?
         //We're using GNU numerals for now, but that's probably not the correct
@@ -297,6 +306,49 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     header.extend(vec![0; 12]); //padding
     
     Ok(header)
+}
+
+/// Generate a tar label for a PAX volume.
+/// 
+/// On PAX format volumes, a `TarLabel` is interpreted as a global extended
+/// header (type flag 'g') and written as such.
+pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
+    let label_path = path::PathBuf::from(format!("/tmp/GlobalHead.{}.{}", tarlabel.nabla, tarlabel.volume_identifier.unwrap_or(0)));
+    let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
+
+    if let Some(ref label_str) = tarlabel.label {
+        extended_stream.extend(format_pax_attribute("GNU.volume.label", &label_str));
+    }
+
+    let mut label = Vec::with_capacity(1024);
+    if extended_stream.len() > 0 {
+        let (relapath_unix, relapath_extended, _) = format_pax_legacy_filename(&canonicalized_tar_path(&label_path, TarFileType::FileStream))?;
+
+        label.extend(relapath_unix);
+        label.extend(format_gnu_numeral(0o644, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
+        label.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: UID
+        label.extend(format_gnu_numeral(0, 8).unwrap_or(vec![0; 8])); //TODO: GID
+        label.extend(format_gnu_numeral(extended_stream.len() as u64, 12).unwrap_or(vec![0; 12])); //File size
+        label.extend(format_gnu_time(&time::SystemTime::now()).unwrap_or(vec![0; 12])); //mtime
+        label.extend("        ".as_bytes()); //checksummable format checksum value
+        label.extend("g".as_bytes()); //File type
+        label.extend(vec![0; 100]); //Link name
+        label.extend("ustar\0".as_bytes()); //magic 'ustar\0'
+        label.extend("00".as_bytes()); //version 00
+        label.extend(vec![0; 8]); //UID Name
+        label.extend(vec![0; 8]); //GID Name
+        label.extend(vec![0; 8]); //Device Major
+        label.extend(vec![0; 8]); //Device Minor
+        label.extend(relapath_extended);
+        label.extend(vec![0; 12]); //padding
+        
+        let padding_needed = (extended_stream.len() % 512) as usize;
+        if padding_needed != 0 {
+            extended_stream.extend(&vec![0; 512 - padding_needed]);
+        }
+    }
+
+    Ok(label)
 }
 
 /// Given a tar header (pax format), calculate a valid checksum.
