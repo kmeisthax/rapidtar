@@ -1,3 +1,5 @@
+//! Abstract representations of tar headers and utilities to generate them.
+
 use std::{path, time, io, cmp, fs};
 use std::io::Read;
 use std::str::FromStr;

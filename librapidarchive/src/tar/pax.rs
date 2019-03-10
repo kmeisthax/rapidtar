@@ -1,3 +1,5 @@
+//! Implementation of the Portable Archive eXchange format, aka PAX.
+
 use std::{io, path, time, ffi};
 use crate::tar::ustar;
 use crate::tar::ustar::{format_tar_numeral, format_tar_string};

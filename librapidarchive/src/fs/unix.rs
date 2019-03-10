@@ -1,3 +1,5 @@
+//! Unix-specific implementations of fs methods.
+
 use std::{io, fs, path, ffi};
 use std::os::unix::prelude::*;
 use crate::{tar, tape};
@@ -14,8 +16,8 @@ pub use crate::fs::portable::ArchivalSink;
 /// 
 /// # Platform considerations
 /// 
-/// This is the Windows version of the function. It supports writes to files
-/// and tape devices.
+/// This is the UNIX version of the function. It supports writes to files and
+/// tape devices.
 pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
     let metadata = fs::metadata(outfile.clone())?;
     
@@ -38,8 +40,8 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
 ///
 /// # Platform considerations
 /// 
-/// This is the Windows version of the function. It implements tape control for
-/// all tape devices in the `\\.\TAPEn` namespace.
+/// This is the UNIX version of the function. It implements tape control for
+/// all tape devices
 pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
     match UnixTapeDevice::<u64>::open_device(&ffi::OsString::from(tapedev.clone())) {
         Ok(tape) => {

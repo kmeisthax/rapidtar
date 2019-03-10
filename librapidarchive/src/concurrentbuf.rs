@@ -1,3 +1,5 @@
+//! Parallel I/O buffers
+
 use std::{io, thread};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Sender, Receiver};

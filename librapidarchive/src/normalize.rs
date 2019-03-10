@@ -1,3 +1,5 @@
+//! Platform-agnostic path normalization compatible with tar behavior.
+
 use std::path;
 use std::fmt;
 

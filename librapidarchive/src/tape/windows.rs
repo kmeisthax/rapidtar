@@ -1,3 +1,5 @@
+//! Windows tape device impls
+
 use std::{io, ptr, fmt, ffi, mem, cmp};
 use std::os::windows::ffi::OsStrExt;
 use std::marker::PhantomData;
