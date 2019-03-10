@@ -53,7 +53,6 @@ fn main() -> io::Result<()> {
         "asr" => tapedevice.seek_blocks(io::SeekFrom::Start(count as u64)),
         "tell" => { println!("{}", tapedevice.tell_blocks()?); Ok(()) },
         "setpartition" => tapedevice.seek_partition(count as u32 + 1),
-        "weof" => { for _ in 0..count { tapedevice.write_filemark(true)? }; Ok(()) },
         "read" => match filename.as_ref() {
             "-" => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut io::stdout()),
             name => io::copy(&mut io::BufReader::with_capacity(blocksize.into_inner(), tapedevice), &mut fs::File::create(name).expect("Could not open target file to dump to"))
