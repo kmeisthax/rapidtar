@@ -1,7 +1,8 @@
 //! Unix-specific implementations of fs methods.
 
-use std::{io, fs, path, ffi};
+use std::{io, fs, path, ffi, ptr, mem};
 use std::os::unix::prelude::*;
+use libc::{getpwuid_r, passwd, group};
 use crate::{tar, tape};
 use crate::tape::unix::UnixTapeDevice;
 use crate::blocking::BlockingWriter;
@@ -101,7 +102,27 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
 /// 
 /// TODO: It should also report a username, too...
 pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok((metadata.uid(), "".to_string()))
+    let mut username = "".to_string();
+    let mut passwd = unsafe { mem::zeroed() }; //TODO: Is uninit safe?
+    let mut buf = Vec::with_capacity(1024);
+    
+    loop {
+        let mut out_passwd = &mut passwd as *mut passwd;
+        let res = unsafe { libc::getpwuid_r(metadata.uid(), &mut passwd, buf.as_mut_ptr(), buf.capacity(), &mut out_passwd) };
+        
+        if (out_passwd as *mut passwd) == ptr::null_mut() {
+            match res {
+                ERANGE => buf.reserve(buf.capacity() * 2),
+                _ => return Err(io::Error::from_raw_os_error(res))
+            }
+            
+            continue;
+        }
+        
+        username = unsafe {ffi::CStr::from_ptr(passwd.pw_name).to_string_lossy().into_owned()};
+    }
+    
+    Ok((metadata.uid(), username))
 }
 
 /// Determine the UNIX group ID and name for a given file.
@@ -113,5 +134,25 @@ pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<
 /// 
 /// TODO: It should also report a group name, too...
 pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok((metadata.gid(), "".to_string()))
+    let mut groupname = "".to_string();
+    let mut group = unsafe { mem::zeroed() }; //TODO: Is uninit safe?
+    let mut buf = Vec::with_capacity(1024);
+    
+    loop {
+        let mut out_group = &mut group as *mut group;
+        let res = unsafe { libc::getgrgid_r(metadata.gid(), &mut group, buf.as_mut_ptr(), buf.capacity(), &mut out_group) };
+        
+        if (out_group as *mut group) == ptr::null_mut() {
+            match res {
+                ERANGE => buf.reserve(buf.capacity() * 2),
+                _ => return Err(io::Error::from_raw_os_error(res))
+            }
+            
+            continue;
+        }
+        
+        groupname = unsafe {ffi::CStr::from_ptr(group.gr_name).to_string_lossy().into_owned()};
+    }
+    
+    Ok((metadata.gid(), groupname))
 }
