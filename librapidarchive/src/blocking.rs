@@ -1,3 +1,6 @@
+//! Buffered writers that work exclusively with one particular block size,
+//! including padding out the last block with null bytes.
+
 use std::io;
 use std::io::Write;
 

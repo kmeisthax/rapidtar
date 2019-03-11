@@ -1,3 +1,5 @@
+//! Multithreaded path traversal (the thing which makes rapidtar rapid).
+
 use std::sync::mpsc::{SyncSender, SendError};
 use std::{io, path, fs, error, fmt, result};
 

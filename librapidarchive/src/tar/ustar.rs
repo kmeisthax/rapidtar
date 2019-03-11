@@ -1,3 +1,5 @@
+//! Implementation of the UNIX Standard tar format, aka USTAR.
+
 use std::{io, path, time, fmt};
 use pad::{PadStr, Alignment};
 use crate::tar::pax;

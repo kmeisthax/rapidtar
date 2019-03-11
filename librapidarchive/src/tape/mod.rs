@@ -1,3 +1,5 @@
+//! Abstraction layer for platform-specific magnetic tape behaviors.
+
 use std::io;
 
 #[cfg(windows)]

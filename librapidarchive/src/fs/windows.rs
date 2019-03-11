@@ -1,3 +1,5 @@
+//! Windows-specific implementations of fs methods.
+
 use std::{io, fs, ffi, path, thread, time};
 use std::cmp::PartialEq;
 use winapi::shared::winerror::{ERROR_MEDIA_CHANGED};

@@ -1,3 +1,7 @@
+//! Cross-platform implementations of fs methods that don't do anything
+//! special. Fallback intended for use when a platform does not provide
+//! enhanced functionality.
+
 use std::{io, fs, path, ffi};
 use std::cmp::PartialEq;
 use crate::{tar, tape, spanning};

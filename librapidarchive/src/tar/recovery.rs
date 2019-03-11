@@ -1,3 +1,6 @@
+//! Recovery code for handling surprise recoverable failures (e.g. volume full)
+//! necessary for spanning
+
 use std::{fs, path, io};
 use std::io::Seek;
 use crate::tar::{ustar, pax};

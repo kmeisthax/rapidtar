@@ -1,19 +1,10 @@
-/// Support for GNU extensions to the tar header format.
+//! tar archive format definitions and serializers.
+
 mod gnu;
-
-/// Support for basic standard tar headers, aka UNIX Standard Tar format.
 mod ustar;
-
-/// Support for Portable Archive eXchange tar headers.
 mod pax;
-
-/// Code for generating tar headers of various kinds.
 pub mod header;
-
 pub mod label;
-
-/// Recovery code for handling surprise recoverable failures (e.g. volume full)
-/// necessary for spanning
 pub mod recovery;
 
 use std::{io, path, fs};

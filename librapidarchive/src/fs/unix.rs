@@ -1,5 +1,8 @@
-use std::{io, fs, path, ffi};
+//! Unix-specific implementations of fs methods.
+
+use std::{io, fs, path, ffi, ptr, mem};
 use std::os::unix::prelude::*;
+use libc::{getpwuid_r, getgrgid_r, passwd, group, ERANGE};
 use crate::{tar, tape};
 use crate::tape::unix::UnixTapeDevice;
 use crate::blocking::BlockingWriter;
@@ -14,32 +17,30 @@ pub use crate::fs::portable::ArchivalSink;
 /// 
 /// # Platform considerations
 /// 
-/// This is the Windows version of the function. It supports writes to files
-/// and tape devices.
+/// This is the UNIX version of the function. It supports writes to files and
+/// tape devices.
 pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
-    let metadata = fs::metadata(outfile.clone())?;
-    
-    //TODO: Better tape detection. This assumes all character devices are tapes.
-    if metadata.file_type().is_char_device() {
-        match UnixTapeDevice::open_device(&ffi::OsString::from(outfile)) {
-            Ok(tape) => {
-                return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)));
-            },
-            Err(e) => Err(e)
+    if let Ok(metadata) = fs::metadata(outfile.clone()) {
+        //TODO: Better tape detection. This assumes all character devices are tapes.
+        if metadata.file_type().is_char_device() {
+            return match UnixTapeDevice::open_device(&ffi::OsString::from(outfile)) {
+                Ok(tape) => Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor))),
+                Err(e) => Err(e)
+            }
         }
-    } else {
-        let file = fs::File::create(outfile.as_ref())?;
-        
-        Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
     }
+
+    let file = fs::File::create(outfile.as_ref())?;
+    
+    Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
 }
 
 /// Open an object for total control of a tape device.
 ///
 /// # Platform considerations
 /// 
-/// This is the Windows version of the function. It implements tape control for
-/// all tape devices in the `\\.\TAPEn` namespace.
+/// This is the UNIX version of the function. It implements tape control for
+/// all tape devices
 pub fn open_tape<P: AsRef<path::Path>>(tapedev: P) -> io::Result<Box<tape::TapeDevice>> where ffi::OsString: From<P>, P: Clone {
     match UnixTapeDevice::<u64>::open_device(&ffi::OsString::from(tapedev.clone())) {
         Ok(tape) => {
@@ -96,10 +97,29 @@ pub fn get_file_type(metadata: &fs::Metadata) -> io::Result<tar::header::TarFile
 ///
 /// This is the Unix version of the function. It reports the correct UID for the
 /// file.
-/// 
-/// TODO: It should also report a username, too...
-pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok((metadata.uid(), "".to_string()))
+pub fn get_unix_owner(metadata: &fs::Metadata, _path: &path::Path) -> io::Result<(u32, String)> {
+    let mut username;
+    let mut passwd = unsafe { mem::zeroed() }; //TODO: Is uninit safe?
+    let mut buf = Vec::with_capacity(1024);
+    
+    loop {
+        let mut out_passwd = &mut passwd as *mut passwd;
+        let res = unsafe { getpwuid_r(metadata.uid(), &mut passwd, buf.as_mut_ptr(), buf.capacity(), &mut out_passwd) };
+        
+        if (out_passwd as *mut passwd) == ptr::null_mut() {
+            match res {
+                ERANGE => buf.reserve(buf.capacity() * 2),
+                _ => return Err(io::Error::from_raw_os_error(res))
+            }
+            
+            continue;
+        }
+        
+        username = unsafe {ffi::CStr::from_ptr(passwd.pw_name).to_string_lossy().into_owned()};
+        break;
+    }
+    
+    Ok((metadata.uid(), username))
 }
 
 /// Determine the UNIX group ID and name for a given file.
@@ -110,6 +130,27 @@ pub fn get_unix_owner(metadata: &fs::Metadata, path: &path::Path) -> io::Result<
 /// file.
 /// 
 /// TODO: It should also report a group name, too...
-pub fn get_unix_group(metadata: &fs::Metadata, path: &path::Path) -> io::Result<(u32, String)> {
-    Ok((metadata.gid(), "".to_string()))
+pub fn get_unix_group(metadata: &fs::Metadata, _path: &path::Path) -> io::Result<(u32, String)> {
+    let mut groupname;
+    let mut group = unsafe { mem::zeroed() }; //TODO: Is uninit safe?
+    let mut buf = Vec::with_capacity(1024);
+    
+    loop {
+        let mut out_group = &mut group as *mut group;
+        let res = unsafe { getgrgid_r(metadata.gid(), &mut group, buf.as_mut_ptr(), buf.capacity(), &mut out_group) };
+        
+        if (out_group as *mut group) == ptr::null_mut() {
+            match res {
+                ERANGE => buf.reserve(buf.capacity() * 2),
+                _ => return Err(io::Error::from_raw_os_error(res))
+            }
+            
+            continue;
+        }
+        
+        groupname = unsafe {ffi::CStr::from_ptr(group.gr_name).to_string_lossy().into_owned()};
+        break;
+    }
+    
+    Ok((metadata.gid(), groupname))
 }

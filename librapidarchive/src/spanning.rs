@@ -1,3 +1,5 @@
+//! Facilities for tracking data within a write buffer for error recovery.
+
 use std::{io, fs, cmp};
 use std::collections::VecDeque;
 

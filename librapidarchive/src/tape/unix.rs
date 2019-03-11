@@ -1,5 +1,6 @@
 //! Unix tape device impls
 
+#![allow(dead_code)]
 use std::{ffi, fs, io, mem};
 use std::io::{Read, Write};
 use std::os::unix::io::{IntoRawFd, RawFd};

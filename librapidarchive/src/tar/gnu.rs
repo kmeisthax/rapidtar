@@ -1,3 +1,5 @@
+//! Support for GNU extensions to the tar header format.
+
 use std::{io, time, fmt};
 use pad::{PadStr, Alignment};
 use num;
