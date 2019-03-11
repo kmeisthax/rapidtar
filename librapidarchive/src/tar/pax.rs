@@ -214,6 +214,9 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     
     assert_eq!(relapath_unix.len(), 100);
     assert_eq!(relapath_extended.len(), 155);
+
+    let ustar_uname = format_tar_string(&tarheader.unix_uname, 32);
+    let ustar_gname = format_tar_string(&tarheader.unix_gname, 32);
     
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
     
@@ -231,6 +234,14 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     
     if let Some(atime) = tarheader.atime {
         extended_stream.extend(format_pax_attribute("atime", &format_pax_time(&atime)?));
+    }
+
+    if let None = ustar_uname {
+        extended_stream.extend(format_pax_attribute("uname", &tarheader.unix_uname));
+    }
+
+    if let None = ustar_gname {
+        extended_stream.extend(format_pax_attribute("gname", &tarheader.unix_gname));
     }
     
     if let Some(birthtime) = tarheader.birthtime {
@@ -261,8 +272,8 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         //behavior.
         header.extend(pax_relapath_unix); //Last 100 bytes of path
         header.extend(format_gnu_numeral(tarheader.unix_mode, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
-        header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8])); //TODO: UID
-        header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8])); //TODO: GID
+        header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8]));
+        header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8]));
         header.extend(format_gnu_numeral(extended_stream.len() as u64, 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File extended header is too long"))?); //File size
         header.extend(format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
         header.extend("        ".as_bytes()); //checksummable format checksum value
@@ -270,8 +281,8 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         header.extend(vec![0; 100]); //TODO: Link name
         header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
         header.extend("00".as_bytes()); //version 00
-        header.extend(format_tar_string(&tarheader.unix_uname, 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File UID Name is too long"))?); //TODO: UID Name
-        header.extend(format_tar_string(&tarheader.unix_gname, 32).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File GID Name is too long"))?); //TODO: GID Name
+        header.extend(ustar_uname.unwrap_or(vec![0; 8]));
+        header.extend(ustar_gname.unwrap_or(vec![0; 8]));
         header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
         header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
         header.extend(pax_relapath_extended);
