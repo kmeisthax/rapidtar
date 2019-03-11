@@ -88,8 +88,8 @@ pub struct TarHeader {
 
 impl TarHeader {
     pub fn abstract_header_for_file(archival_path: &path::Path, entry_metadata: &fs::Metadata, entry_path: &path::Path) -> io::Result<TarHeader> {
-        let (uid, owner) = get_unix_owner(entry_metadata, entry_path)?;
-        let (gid, group) = get_unix_group(entry_metadata, entry_path)?;
+        let (uid, owner) = get_unix_owner(entry_metadata, entry_path).unwrap_or((65534, "nobody".to_string()));
+        let (gid, group) = get_unix_group(entry_metadata, entry_path).unwrap_or((65534, "nogroup".to_string()));
 
         Ok(TarHeader {
             path: Box::new(normalize::normalize(&archival_path)),
