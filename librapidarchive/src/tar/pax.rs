@@ -217,6 +217,7 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
 
     let ustar_uname = format_tar_string(&tarheader.unix_uname, 32);
     let ustar_gname = format_tar_string(&tarheader.unix_gname, 32);
+    let ustar_mtime = format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).ok();
     
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
     
@@ -228,8 +229,10 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         extended_stream.extend(format_pax_attribute("path", &canonical_path));
     }
     
-    if let Some(mtime) = tarheader.mtime {
-        extended_stream.extend(format_pax_attribute("mtime", &format_pax_time(&mtime)?));
+    if let None = ustar_mtime {
+        if let Some(mtime) = tarheader.mtime {
+            extended_stream.extend(format_pax_attribute("mtime", &format_pax_time(&mtime)?));
+        }
     }
     
     if let Some(atime) = tarheader.atime {
@@ -275,14 +278,14 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         header.extend(format_gnu_numeral(tarheader.unix_uid, 8).unwrap_or(vec![0; 8]));
         header.extend(format_gnu_numeral(tarheader.unix_gid, 8).unwrap_or(vec![0; 8]));
         header.extend(format_gnu_numeral(extended_stream.len() as u64, 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "File extended header is too long"))?); //File size
-        header.extend(format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
+        header.extend(ustar_mtime.clone().unwrap_or(vec![0; 12])); //mtime
         header.extend("        ".as_bytes()); //checksummable format checksum value
         header.extend("x".as_bytes());
         header.extend(vec![0; 100]); //TODO: Link name
         header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
         header.extend("00".as_bytes()); //version 00
-        header.extend(ustar_uname.unwrap_or(vec![0; 8]));
-        header.extend(ustar_gname.unwrap_or(vec![0; 8]));
+        header.extend(ustar_uname.clone().unwrap_or(vec![0; 8]));
+        header.extend(ustar_gname.clone().unwrap_or(vec![0; 8]));
         header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
         header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
         header.extend(pax_relapath_extended);
@@ -305,14 +308,14 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     } else {
         header.extend(format_gnu_numeral(0, 12).unwrap_or(vec![0; 12])); //Non-file entries must have a size of 0, or 7zip tries to skip them
     }
-    header.extend(format_gnu_time(&tarheader.mtime.unwrap_or(time::UNIX_EPOCH)).unwrap_or(vec![0; 12])); //mtime
+    header.extend(ustar_mtime.unwrap_or(vec![0; 12])); //mtime
     header.extend("        ".as_bytes()); //checksummable format checksum value
     header.push(tarheader.file_type.type_flag() as u8); //File type
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
-    header.extend(format_tar_string(&tarheader.unix_uname, 32).unwrap_or(vec![0; 8])); //TODO: UID Name
-    header.extend(format_tar_string(&tarheader.unix_gname, 32).unwrap_or(vec![0; 8])); //TODO: GID Name
+    header.extend(ustar_uname.unwrap_or(vec![0; 8])); //TODO: UID Name
+    header.extend(ustar_gname.unwrap_or(vec![0; 8])); //TODO: GID Name
     header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
     header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
     header.extend(relapath_extended);
