@@ -159,8 +159,8 @@ fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) 
                 "y" => {
                     break;
                 },
-                "n " => {
-                    tarparams.outfile = String::from(&response[2..]);
+                "n" if response.len() > 2 => {
+                    tarparams.outfile = String::from(response[2..].trim());
                     break;
                 }
                 _ => eprintln!("Please enter a valid response.")

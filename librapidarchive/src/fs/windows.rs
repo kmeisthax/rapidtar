@@ -135,7 +135,7 @@ fn conv_wcstr_to_ruststr(wcstr: &[WCHAR]) -> Option<String> {
     Some(ffi::OsString::from_wide(&wcstr[..lookup_name_length]).to_string_lossy().into_owned())
 }
 
-fn lookup_name_of_sid(sid: PSID) -> (String, String) {
+fn lookup_name_of_sid(sid: PSID) -> io::Result<(String, String)> {
     let mut principalname;
     let mut principaldomain;
     let mut lookup_name_buffer : Vec<WCHAR> = Vec::with_capacity(256);
@@ -147,8 +147,12 @@ fn lookup_name_of_sid(sid: PSID) -> (String, String) {
         let mut lookup_name_capacity = lookup_name_buffer.capacity() as u32;
         let mut lookup_domain_capacity = lookup_domain_buffer.capacity() as u32;
 
-        unsafe {winbase::LookupAccountSidW(ptr::null(), sid, lookup_name_buffer.as_mut_ptr(), &mut lookup_name_capacity, lookup_domain_buffer.as_mut_ptr(), &mut lookup_domain_capacity, &mut lookup_use)};
+        let err = unsafe {winbase::LookupAccountSidW(ptr::null(), sid, lookup_name_buffer.as_mut_ptr(), &mut lookup_name_capacity, lookup_domain_buffer.as_mut_ptr(), &mut lookup_domain_capacity, &mut lookup_use)};
 
+        if err == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        
         if lookup_name_capacity as usize > lookup_name_buffer.capacity() {
             lookup_name_buffer.reserve(lookup_name_capacity as usize);
             continue;
@@ -188,7 +192,7 @@ fn lookup_name_of_sid(sid: PSID) -> (String, String) {
         break;
     }
 
-    (principalname, principaldomain)
+    Ok((principalname, principaldomain))
 }
 
 /// Determine the UNIX owner ID and name for a given file.
@@ -214,7 +218,7 @@ pub fn get_unix_owner(_metadata: &fs::Metadata, path: &path::Path) -> io::Result
 
     unsafe { aclapi::GetSecurityInfo(nt_handle as *mut winapi::ctypes::c_void, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, &mut owner_sid, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), &mut security_descriptor) };
 
-    let userlookup = lookup_name_of_sid(owner_sid);
+    let userlookup = lookup_name_of_sid(owner_sid)?;
 
     if security_descriptor != ptr::null_mut() {
         unsafe { winbase::LocalFree(security_descriptor) };
@@ -246,7 +250,7 @@ pub fn get_unix_group(_metadata: &fs::Metadata, path: &path::Path) -> io::Result
 
     unsafe { aclapi::GetSecurityInfo(nt_handle as *mut winapi::ctypes::c_void, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, ptr::null_mut(), &mut group_sid, ptr::null_mut(), ptr::null_mut(), &mut security_descriptor) };
 
-    let grouplookup = lookup_name_of_sid(group_sid);
+    let grouplookup = lookup_name_of_sid(group_sid)?;
 
     if security_descriptor != ptr::null_mut() {
         unsafe { winbase::LocalFree(security_descriptor) };
