@@ -458,6 +458,48 @@ impl <W: io::Write> io::Write for UnbufferedWriter<W> {
 impl <W: io::Write, P> RecoverableWrite<P> for UnbufferedWriter<W> {
 }
 
+/// A writer with an imposed limit on how much data it can accept.
+/// 
+/// Once the limit is reached, no more can be written to the device, and further
+/// writes are restricted.
+/// 
+/// #Implementation detail
+/// This function completely refuses any write which would cause the writer to
+/// exceed the remaining space, even if space remains to accept it partially.
+pub struct LimitingWriter<W: io::Write> {
+    inner: W,
+    remain: u64,
+}
+
+impl<W: io::Write> LimitingWriter<W> {
+    pub fn wrap(inner: W, limit: u64) -> LimitingWriter<W> {
+        LimitingWriter {
+            inner: inner,
+            remain: limit
+        }
+    }
+
+    pub fn as_inner_writer(&self) -> &W {
+        &self.inner
+    }
+}
+
+impl <W: io::Write> io::Write for LimitingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if buf.len() as u64 > self.remain {
+            return Ok(0)
+        }
+
+        self.remain -= buf.len() as u64;
+
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DataZone, DataZoneStream};
