@@ -2,6 +2,7 @@
 
 use std::{io, fs, cmp};
 use std::collections::VecDeque;
+use crate::{fs as rapidtar_fs, tape};
 
 /// Represents data which has been committed to a write buffer and may fail to
 /// be written to the device.
@@ -467,8 +468,8 @@ impl <W: io::Write, P> RecoverableWrite<P> for UnbufferedWriter<W> {
 /// This function completely refuses any write which would cause the writer to
 /// exceed the remaining space, even if space remains to accept it partially.
 pub struct LimitingWriter<W: io::Write> {
-    inner: W,
     remain: u64,
+    inner: W,
 }
 
 impl<W: io::Write> LimitingWriter<W> {
@@ -497,6 +498,34 @@ impl <W: io::Write> io::Write for LimitingWriter<W> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
+    }
+}
+
+impl<W, I> RecoverableWrite<I> for LimitingWriter<W> where W: RecoverableWrite<I> {
+    fn begin_data_zone(&mut self, ident: I) {
+        self.inner.begin_data_zone(ident);
+    }
+
+    fn resume_data_zone(&mut self, ident: I, committed: u64) {
+        self.inner.resume_data_zone(ident, committed);
+    }
+
+    fn end_data_zone(&mut self) {
+        self.inner.end_data_zone();
+    }
+
+    fn uncommitted_writes(&self) -> Vec<DataZone<I>> {
+        self.inner.uncommitted_writes()
+    }
+}
+
+impl<W, I> rapidtar_fs::ArchivalSink<I> for LimitingWriter<W> where W: rapidtar_fs::ArchivalSink<I> + Send {
+    fn downcast_seek(&mut self) -> Option<&mut dyn io::Seek> {
+        self.inner.downcast_seek()
+    }
+
+    fn downcast_tapedevice(&mut self) -> Option<&mut dyn tape::TapeDevice> {
+        self.inner.downcast_tapedevice()
     }
 }
 

@@ -3,7 +3,7 @@
 use std::{io, fs, path, ffi, ptr, mem};
 use std::os::unix::prelude::*;
 use libc::{getpwuid_r, getgrgid_r, passwd, group, ERANGE};
-use crate::{tar, tape};
+use crate::{tar, tape, spanning};
 use crate::tape::unix::UnixTapeDevice;
 use crate::blocking::BlockingWriter;
 use crate::concurrentbuf::ConcurrentWriteBuffer;
@@ -19,12 +19,15 @@ pub use crate::fs::portable::ArchivalSink;
 /// 
 /// This is the UNIX version of the function. It supports writes to files and
 /// tape devices.
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration, limit: Option<u64>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
     if let Ok(metadata) = fs::metadata(outfile.clone()) {
         //TODO: Better tape detection. This assumes all character devices are tapes.
         if metadata.file_type().is_char_device() {
             return match UnixTapeDevice::open_device(&ffi::OsString::from(outfile)) {
-                Ok(tape) => Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor))),
+                Ok(tape) => match limit {
+                    Some(limit) => Ok(Box::new(spanning::LimitingWriter::wrap(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor), limit))),
+                    None => Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)))
+                },
                 Err(e) => Err(e)
             }
         }
@@ -32,7 +35,10 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
 
     let file = fs::File::create(outfile.as_ref())?;
     
-    Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
+    match limit {
+        Some(limit) => Ok(Box::new(spanning::LimitingWriter::wrap(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit), limit))),
+        None => Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
+    }
 }
 
 /// Open an object for total control of a tape device.

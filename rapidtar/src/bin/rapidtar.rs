@@ -32,6 +32,7 @@ struct TarParameter {
     pub verbose: bool,
     pub totals: bool,
     pub spanning: bool,
+    pub spanning_size_limit: Option<u64>,
     pub perf_tuning: tuning::Configuration,
     pub label_title: Option<String>
 }
@@ -50,6 +51,7 @@ impl Default for TarParameter {
             verbose: false,
             totals: false,
             spanning: false,
+            spanning_size_limit: None,
             perf_tuning: tuning::Configuration::default(),
             label_title: None
         }
@@ -60,6 +62,7 @@ impl TarParameter {
     fn from_proc_args() -> Self {
         let mut tarparams = TarParameter::default();
         let mut serial_buffer_limit_input = units::DataSize::from(1024*1024*1024 as u64);
+        let mut volume_size_limit : Option<units::DataSize<u64>> = None;
         
         {
             let mut ap = ArgumentParser::new();
@@ -79,6 +82,7 @@ impl TarParameter {
             ap.refer(&mut tarparams.format).add_option(&["--format"], Store, "The tar format to write or expect.");
             ap.refer(&mut tarparams.totals).add_option(&["--totals"], StoreTrue, "Print performance statistics after the operation has completed.");
             ap.refer(&mut tarparams.spanning).add_option(&["-M", "--multi-volume"], StoreTrue, "Use multiple-volume tar archives.");
+            ap.refer(&mut volume_size_limit).add_option(&["-L", "--tape-length"], StoreOption, "The maximum volume size to create");
             ap.refer(&mut tarparams.perf_tuning.channel_queue_depth).add_option(&["--channel_queue_depth"], Store, "How many files may be stored in memory pending archival");
             ap.refer(&mut tarparams.perf_tuning.parallel_io_limit).add_option(&["--parallel_io_limit"], Store, "How many threads may be created to retrieve file metadata and contents");
             ap.refer(&mut tarparams.perf_tuning.blocking_factor).add_option(&["--blocking_factor"], Store, "The number of bytes * 512 to write at once - only applies for tape");
@@ -90,6 +94,10 @@ impl TarParameter {
         }
 
         tarparams.perf_tuning.serial_buffer_limit = serial_buffer_limit_input.into_inner();
+        tarparams.spanning_size_limit = match volume_size_limit {
+            Some(limit) => Some(limit.into_inner()),
+            None => None
+        };
 
         tarparams
     }
@@ -214,7 +222,7 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
                 return Err(io::Error::new(io::ErrorKind::Other, "User cancelled the operation"));
             }
 
-            let mut tarball = match open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning) {
+            let mut tarball = match open_sink(&tarparams.outfile, &tarparams.perf_tuning, tarparams.spanning_size_limit) {
                 Ok(tarball) => tarball,
                 Err(e) => {
                     eprintln!("Error trying to open new volume: {}", e);
@@ -330,7 +338,7 @@ fn main() -> io::Result<()> {
     match tarparams.operation {
         None => Err(io::Error::new(io::ErrorKind::InvalidInput, "You must specify one of the Acdtrux options.")),
         Some(TarOperation::Create) => {
-            let mut tarball = open_sink(tarparams.outfile.clone(), &tarparams.perf_tuning)?;
+            let mut tarball = open_sink(&tarparams.outfile, &tarparams.perf_tuning, tarparams.spanning_size_limit)?;
             let receiver : Receiver<tar::header::HeaderGenResult> = read_traverse(&parallel_io_pool, &tarparams)?;
 
             while tarresult.cancelled == false {

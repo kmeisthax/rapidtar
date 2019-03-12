@@ -8,7 +8,7 @@ use winapi::um::{winbase, aclapi};
 use winapi::um::accctrl::SE_FILE_OBJECT;
 use winapi::um::winnt::{WCHAR, PSID, OWNER_SECURITY_INFORMATION};
 use winapi::shared::winerror::{ERROR_MEDIA_CHANGED};
-use crate::tape;
+use crate::{tape, spanning};
 use crate::tape::windows::WindowsTapeDevice;
 use crate::blocking::BlockingWriter;
 use crate::concurrentbuf::ConcurrentWriteBuffer;
@@ -24,7 +24,7 @@ pub use crate::fs::portable::{ArchivalSink, get_unix_mode, get_file_type};
 /// 
 /// This is the Windows version of the function. It supports writes to files
 /// and tape devices.
-pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
+pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration, limit: Option<u64>) -> io::Result<Box<ArchivalSink<I>>> where ffi::OsString: From<P>, P: Clone, I: 'static + Send + Clone + PartialEq {
     let mut is_tape = false;
     
     {
@@ -50,7 +50,10 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
     if is_tape {
         loop {
             match WindowsTapeDevice::open_device(&ffi::OsString::from(outfile.clone())) {
-                Ok(tape) => return Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor))),
+                Ok(tape) => return match limit {
+                    Some(limit) => Ok(Box::new(spanning::LimitingWriter::wrap(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor), limit))),
+                    None => Ok(Box::new(BlockingWriter::new_with_factor(ConcurrentWriteBuffer::new(tape, tuning.serial_buffer_limit), tuning.blocking_factor)))
+                },
                 Err(e) => {
                     match e.raw_os_error() {
                         Some(errcode) if errcode == ERROR_MEDIA_CHANGED as i32 => {
@@ -69,7 +72,10 @@ pub fn open_sink<P: AsRef<path::Path>, I>(outfile: P, tuning: &Configuration) ->
     } else {
         let file = fs::File::create(outfile.as_ref())?;
         
-        Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
+        match limit {
+            Some(limit) => Ok(Box::new(spanning::LimitingWriter::wrap(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit), limit))),
+            None => Ok(Box::new(ConcurrentWriteBuffer::new(file, tuning.serial_buffer_limit)))
+        }
     }
 }
 
