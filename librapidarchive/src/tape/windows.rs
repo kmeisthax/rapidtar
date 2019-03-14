@@ -104,41 +104,6 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
     fn handle_tell_error(&mut self, err: io::Error) -> io::Result<()> {
         self.handle_seek_error(err)
     }
-
-    /// Given an error occured during reading, determine if it can be handled or
-    /// not, and if so, handle it transparently.
-    /// 
-    /// If the error was handled, returns `Ok`, otherwise returns the original
-    /// error.
-    /// 
-    /// # Error handling behavior
-    /// 
-    /// If the error was an end-of-file, end-of-set, or end-of-data condition,
-    /// then the tape device is marked as EOF to prohibit future reads.
-    fn handle_read_error(&mut self, err: io::Error) -> io::Result<()> {
-        match err.raw_os_error() {
-            Some(errcode) if errcode == ERROR_FILEMARK_DETECTED as i32 || errcode == ERROR_SETMARK_DETECTED as i32 || errcode == ERROR_NO_DATA_DETECTED as i32 => {
-                self.eof_condition = true;
-
-                unsafe { self.block_spill_buffer.set_len(0) };
-                Ok(())
-            },
-            Some(errcode) if errcode == ERROR_MORE_DATA as i32 || errcode == ERROR_MEDIA_CHANGED as i32 => {
-                self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
-
-                let res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, ((-1 as i64) & 0xFFFFFFFF) as DWORD, ((-1 as i64) >> 32) as DWORD, FALSE as BOOL) };
-                if res != NO_ERROR {
-                    return self.handle_seek_error(io::Error::from_raw_os_error(res as i32));
-                }
-                
-                Ok(())
-            },
-            Some(errcode) => {
-                return Err(io::Error::from_raw_os_error(errcode as i32));
-            },
-            _ => return Err(err)
-        }
-    }
 }
 
 impl<P> Drop for WindowsTapeDevice<P> where P: Clone {
@@ -178,7 +143,28 @@ impl<P> WindowsTapeDevice<P> where P: Clone {
             if unsafe { fileapi::ReadFile(self.tape_device, self.block_spill_buffer.as_mut_ptr() as LPVOID, self.block_spill_buffer.capacity() as DWORD, &mut read_count, ptr::null_mut()) } != TRUE as BOOL {
                 let err = io::Error::last_os_error();
                 
-                self.handle_read_error(err)?;
+                match err.raw_os_error() {
+                    Some(errcode) if errcode == ERROR_FILEMARK_DETECTED as i32 || errcode == ERROR_SETMARK_DETECTED as i32 || errcode == ERROR_NO_DATA_DETECTED as i32 => {
+                        self.eof_condition = true;
+
+                        unsafe { self.block_spill_buffer.set_len(0) };
+                        break;
+                    },
+                    Some(errcode) if errcode == ERROR_MORE_DATA as i32 || errcode == ERROR_MEDIA_CHANGED as i32 => {
+                        self.block_spill_buffer.reserve(self.block_spill_buffer.capacity() * 2);
+
+                        let res = unsafe { winbase::SetTapePosition(self.tape_device, TAPE_SPACE_RELATIVE_BLOCKS, 0, ((-1 as i64) & 0xFFFFFFFF) as DWORD, ((-1 as i64) >> 32) as DWORD, FALSE as BOOL) };
+                        if res != NO_ERROR {
+                            return self.handle_seek_error(io::Error::from_raw_os_error(res as i32));
+                        }
+                        
+                        continue;
+                    },
+                    Some(errcode) => {
+                        return Err(io::Error::from_raw_os_error(errcode as i32));
+                    },
+                    _ => return Err(err)
+                }
             }
             
             let bounded_read_count = cmp::min(read_count as usize, self.block_spill_buffer.capacity());
