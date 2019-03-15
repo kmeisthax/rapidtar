@@ -488,6 +488,11 @@ impl<W: io::Write> LimitingWriter<W> {
 impl <W: io::Write> io::Write for LimitingWriter<W> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if buf.len() as u64 > self.remain {
+            //Since this writer simulates a write failure, any buffer behind
+            //this passthrough must be flushed if we want to be able to recover
+            //from the failure.
+            self.inner.flush()?;
+
             return Ok(0)
         }
 
