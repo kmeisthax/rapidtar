@@ -198,6 +198,25 @@ impl<T, P> ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + Rec
             }
         }
     }
+
+    /// Drain all the data 'currently' in the buffer.
+    /// 
+    /// This function achieves that by using `try_recv`, which errors out if the
+    /// channel is empty but not disconnected, which is what we want.
+    fn drain_buf_until_empty(&mut self) -> io::Result<()> {
+        loop {
+            match self.resp_recv.try_recv() {
+                Ok(DidWriteAll(Ok(size))) => self.mark_data_committed(size as u64),
+                Ok(DidWriteAll(Err(e))) => return Err(e),
+                Ok(DidRead(Err(e))) => return Err(e), //this shouldn't happen but w/e
+                Ok(DidFlush(Ok(()))) => return Ok(()),
+                Ok(DidFlush(Err(e))) => return Err(e),
+                Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(()),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return Err(io::Error::new(io::ErrorKind::Other, "Buffer thread unexpectedly terminated")),
+                _ => continue
+            }
+        }
+    }
 }
 
 impl<T, P> io::Write for ConcurrentWriteBuffer<T, P> where T: 'static + io::Write + Send + RecoverableWrite<P>, P: 'static + Send + Clone + PartialEq {
