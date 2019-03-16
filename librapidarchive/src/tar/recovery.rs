@@ -7,6 +7,7 @@ use crate::tar::{ustar, pax};
 use crate::tar::header::{TarFormat, TarHeader, TarFileType, HeaderGenResult};
 use crate::fs::ArchivalSink;
 use crate::spanning::DataZone;
+use crate::normalize;
 
 /// Information on how to recover from a failed serialization.
 #[derive(Clone, PartialEq)]
@@ -90,7 +91,7 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
                 TarFormat::POSIX => {
                     offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
 
-                    recovery_header.recovery_path = Some(ident.original_path.clone());
+                    recovery_header.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
                     recovery_header.recovery_total_size = Some(metadata.len());
                     recovery_header.recovery_seek_offset = Some(offset);
                     
