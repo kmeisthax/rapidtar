@@ -235,7 +235,19 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
 
             tarresult.volume_count += 1;
 
-            label_proc(tarball.deref_mut(), lost_zones.get(9), tarparams, tarresult)?;
+            let mut did_label = false;
+
+            for ref zone in lost_zones.iter() {
+                if let Some(_) = &zone.ident {
+                    label_proc(tarball.deref_mut(), Some(zone), tarparams, tarresult)?;
+                    did_label = true;
+                    break;
+                }
+            }
+
+            if !did_label {
+                label_proc(tarball.deref_mut(), None, tarparams, tarresult)?;
+            }
             
             match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
                 Ok(None) => {
