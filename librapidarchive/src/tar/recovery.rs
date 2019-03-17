@@ -76,19 +76,23 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
     while let Some(zone) = iter.next() {
         if let Some(ident) = &zone.ident {
             let metadata = fs::symlink_metadata(&ident.canonical_path.as_ref())?;
-            let recovery_header = TarHeader::with_recovery(&ident.original_path, &metadata, &ident.canonical_path, zone)?;
+            let mut recovery_header = TarHeader::with_recovery(&ident.original_path, &metadata, &ident.canonical_path, zone)?;
             let offset;
             let mut concrete_tarheader;
             
             match format {
                 TarFormat::USTAR => {
+                    //USTAR cannot split files, so we need to restore the original file size
                     offset = 0;
+                    if let Some(header_offset) = recovery_header.recovery_seek_offset {
+                        recovery_header.file_size += header_offset;
+                    }
 
                     concrete_tarheader = ustar::ustar_header(&recovery_header)?;
                     ustar::checksum_header(&mut concrete_tarheader);
                 },
                 TarFormat::POSIX => {
-                    offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
+                    offset = recovery_header.recovery_seek_offset.unwrap_or(0);
                     
                     concrete_tarheader = pax::pax_header(&recovery_header)?;
                     pax::checksum_header(&mut concrete_tarheader);
