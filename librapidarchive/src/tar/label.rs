@@ -1,6 +1,6 @@
 //! Code dealing with global headers, which we call labels.
 
-use std::{io, fs, process, path};
+use std::{io, fs, process, path, cmp};
 use crate::tar::{header, pax, recovery};
 use crate::{normalize, spanning};
 
@@ -44,7 +44,7 @@ impl TarLabel {
 
             label.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
             label.recovery_total_size = Some(metadata.len());
-            label.recovery_seek_offset = Some(offset);
+            label.recovery_seek_offset = Some(cmp::min(offset, metadata.len()));
         }
 
         Ok(label)

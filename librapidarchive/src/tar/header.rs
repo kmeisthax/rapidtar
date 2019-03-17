@@ -124,10 +124,10 @@ impl TarHeader {
         if let Some(ref ident) = zone.ident {
             let offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
 
-            recovery_header.file_size = recovery_header.file_size.checked_sub(offset).unwrap_or(0);
             recovery_header.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
             recovery_header.recovery_total_size = Some(entry_metadata.len());
-            recovery_header.recovery_seek_offset = Some(offset);
+            recovery_header.recovery_seek_offset = Some(cmp::min(offset, recovery_header.file_size));
+            recovery_header.file_size = recovery_header.file_size.checked_sub(offset).unwrap_or(0);
         }
 
         Ok(recovery_header)
