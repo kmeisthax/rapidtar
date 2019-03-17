@@ -7,7 +7,6 @@ use crate::tar::{ustar, pax};
 use crate::tar::header::{TarFormat, TarHeader, TarFileType, HeaderGenResult};
 use crate::fs::ArchivalSink;
 use crate::spanning::DataZone;
-use crate::normalize;
 
 /// Information on how to recover from a failed serialization.
 #[derive(Clone, PartialEq)]
@@ -77,7 +76,7 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
     while let Some(zone) = iter.next() {
         if let Some(ident) = &zone.ident {
             let metadata = fs::symlink_metadata(&ident.canonical_path.as_ref())?;
-            let mut recovery_header = TarHeader::abstract_header_for_file(&ident.original_path, &metadata, &ident.canonical_path)?;
+            let recovery_header = TarHeader::with_recovery(&ident.original_path, &metadata, &ident.canonical_path, zone)?;
             let offset;
             let mut concrete_tarheader;
             
@@ -90,10 +89,6 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
                 },
                 TarFormat::POSIX => {
                     offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
-
-                    recovery_header.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
-                    recovery_header.recovery_total_size = Some(metadata.len());
-                    recovery_header.recovery_seek_offset = Some(offset);
                     
                     concrete_tarheader = pax::pax_header(&recovery_header)?;
                     pax::checksum_header(&mut concrete_tarheader);

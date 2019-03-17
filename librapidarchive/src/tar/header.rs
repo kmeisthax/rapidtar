@@ -4,8 +4,8 @@ use std::{path, time, io, cmp, fs};
 use std::io::Read;
 use std::str::FromStr;
 use crate::fs::{get_file_type, get_unix_mode, get_unix_owner, get_unix_group};
-use crate::normalize;
-use crate::tar::{ustar, pax};
+use crate::{normalize, spanning};
+use crate::tar::{ustar, pax, recovery};
 
 #[derive(Copy, Clone, Debug)]
 pub enum TarFormat {
@@ -116,6 +116,21 @@ impl TarHeader {
             recovery_total_size: None,
             recovery_seek_offset: None
         })
+    }
+
+    pub fn with_recovery(archival_path: &path::Path, entry_metadata: &fs::Metadata, entry_path: &path::Path, zone: &spanning::DataZone<recovery::RecoveryEntry>) -> io::Result<TarHeader> {
+        let mut recovery_header = Self::abstract_header_for_file(archival_path, entry_metadata, entry_path)?;
+
+        if let Some(ref ident) = zone.ident {
+            let offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
+
+            recovery_header.file_size = recovery_header.file_size.checked_sub(offset).unwrap_or(0);
+            recovery_header.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
+            recovery_header.recovery_total_size = Some(entry_metadata.len());
+            recovery_header.recovery_seek_offset = Some(offset);
+        }
+
+        Ok(recovery_header)
     }
 }
 
