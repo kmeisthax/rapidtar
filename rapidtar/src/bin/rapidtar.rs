@@ -182,8 +182,11 @@ fn volume_exchange_cli(tarparams: &mut TarParameter, tarresult: &mut TarResult) 
 /// is not necessary. Clients needing a tar label should ensure that they are
 /// using a tar format that allows labeling and have a label parameter
 /// configured.
-fn label_proc<P>(tarball: &mut fs::ArchivalSink<P>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
-    let mut tarlabel = tar::label::TarLabel::default();
+fn label_proc<P>(tarball: &mut fs::ArchivalSink<P>, zone: Option<&spanning::DataZone<tar::recovery::RecoveryEntry>>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
+    let mut tarlabel = match zone {
+        Some(zone) => tar::label::TarLabel::with_recovery(zone)?,
+        None => tar::label::TarLabel::default()
+    };
 
     tarlabel.label = tarparams.label_title.clone();
     tarlabel.volume_identifier = match tarparams.spanning {
@@ -232,7 +235,7 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
 
             tarresult.volume_count += 1;
 
-            label_proc(tarball.deref_mut(), tarparams, tarresult)?;
+            label_proc(tarball.deref_mut(), lost_zones.get(9), tarparams, tarresult)?;
             
             match tar::recovery::recover_data(tarball.deref_mut(), tarparams.format, lost_zones.clone()) {
                 Ok(None) => {
@@ -258,7 +261,7 @@ fn recover_proc(old_tarball: Box<fs::ArchivalSink<tar::recovery::RecoveryEntry>>
 /// In the event of a write failure, this function will report the failed entry
 /// for possible error recovery.
 fn serialize_proc(tarball: &mut fs::ArchivalSink<tar::recovery::RecoveryEntry>, receiver: &Receiver<tar::header::HeaderGenResult>, failed_entry: &mut Option<tar::header::HeaderGenResult>, tarparams: &mut TarParameter, tarresult: &mut TarResult) -> io::Result<()> {
-    label_proc(tarball, tarparams, tarresult)?;
+    label_proc(tarball, None, tarparams, tarresult)?;
 
     while let Ok(entry) = receiver.recv() {
         if tarparams.verbose {

@@ -250,19 +250,6 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     if let Some(birthtime) = tarheader.birthtime {
         extended_stream.extend(format_pax_attribute("LIBARCHIVE.creationtime", &format_pax_time(&birthtime)?));
     }
-    
-    if let Some(ref recovery_path) = tarheader.recovery_path {
-        let canonical_recovery_path = canonicalized_tar_path(&recovery_path.clone(), tarheader.file_type);
-        extended_stream.extend(format_pax_attribute("GNU.volume.filename", &canonical_recovery_path));
-    }
-
-    if let Some(recovery_total_size) = tarheader.recovery_total_size {
-        extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_total_size)));
-    }
-
-    if let Some(recovery_seek_offset) = tarheader.recovery_seek_offset {
-        extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
-    }
 
     let mut header : Vec<u8> = Vec::with_capacity(1536);
     
@@ -334,6 +321,21 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
 
     if let Some(ref label_str) = tarlabel.label {
         extended_stream.extend(format_pax_attribute("GNU.volume.label", &label_str));
+    }
+
+    if let Some(ref recovery_path) = tarlabel.recovery_path {
+        if let Some(recovery_file_type) = tarlabel.recovery_file_type {
+            let canonical_recovery_path = canonicalized_tar_path(&recovery_path.clone(), recovery_file_type);
+            extended_stream.extend(format_pax_attribute("GNU.volume.filename", &canonical_recovery_path));
+        }
+    }
+
+    if let Some(recovery_total_size) = tarlabel.recovery_total_size {
+        extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_total_size)));
+    }
+
+    if let Some(recovery_seek_offset) = tarlabel.recovery_seek_offset {
+        extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
     }
 
     let mut label = Vec::with_capacity(1024);
