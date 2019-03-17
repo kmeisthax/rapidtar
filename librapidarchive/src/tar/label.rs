@@ -3,6 +3,7 @@
 use std::{io, fs, process, path, cmp};
 use crate::tar::{header, pax, recovery};
 use crate::{normalize, spanning};
+use crate::fs as rapidtar_fs;
 
 /// Represents globally-applcable information for an entire tar archive file,
 /// such as it's volume label.
@@ -43,6 +44,7 @@ impl TarLabel {
             let offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
 
             label.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
+            label.recovery_file_type = Some(rapidtar_fs::get_file_type(&metadata)?);
             label.recovery_total_size = Some(metadata.len());
             label.recovery_seek_offset = Some(cmp::min(offset, metadata.len()));
         }
@@ -53,7 +55,12 @@ impl TarLabel {
 
 pub fn labelgen(format: header::TarFormat, tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
     match format {
-        header::TarFormat::POSIX => pax::pax_label(tarlabel),
+        header::TarFormat::POSIX => {
+            let mut serial_label = pax::pax_label(tarlabel)?;
+            pax::checksum_header(&mut serial_label);
+
+            Ok(serial_label)
+        },
         _ => Ok(Vec::new())
     }
 }

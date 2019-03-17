@@ -338,8 +338,9 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
         extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
     }
 
-    let mut label = Vec::with_capacity(1024);
     if extended_stream.len() > 0 {
+        let mut label = Vec::with_capacity(512 * extended_stream.len());
+
         let (relapath_unix, relapath_extended, _) = format_pax_legacy_filename(&canonicalized_tar_path(&label_path, TarFileType::FileStream))?;
 
         label.extend(relapath_unix);
@@ -364,9 +365,13 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
         if padding_needed != 0 {
             extended_stream.extend(&vec![0; 512 - padding_needed]);
         }
-    }
 
-    Ok(label)
+        label.extend(extended_stream);
+        
+        Ok(label)
+    } else {
+        Ok(Vec::with_capacity(0))
+    }
 }
 
 /// Given a tar header (pax format), calculate a valid checksum.
@@ -380,6 +385,10 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
 /// of the header and checksumming them. If there is only one header then this
 /// behaves identically to ustar::checksum_header.
 pub fn checksum_header(header: &mut Vec<u8>) {
+    if header.len() < 512 {
+        return;
+    }
+
     ustar::checksum_header(&mut header[0..512]);
     
     if header.len() >= 1024 {

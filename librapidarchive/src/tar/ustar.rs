@@ -131,7 +131,13 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
 /// Given a tar header (ustar format), calculate a valid checksum.
 /// 
 /// Any existing data in the header checksum field will be destroyed.
+/// 
+/// Attempting to checksum an empty header fails silently.
 pub fn checksum_header(header: &mut [u8]) {
+    if header.len() < 157 {
+        return;
+    }
+
     let mut checksum : u64 = 0;
     
     header[148..156].clone_from_slice("        ".as_bytes());
