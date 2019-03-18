@@ -271,8 +271,8 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
         header.extend(vec![0; 100]); //TODO: Link name
         header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
         header.extend("00".as_bytes()); //version 00
-        header.extend(ustar_uname.clone().unwrap_or(vec![0; 8]));
-        header.extend(ustar_gname.clone().unwrap_or(vec![0; 8]));
+        header.extend(ustar_uname.clone().unwrap_or(vec![0; 32]));
+        header.extend(ustar_gname.clone().unwrap_or(vec![0; 32]));
         header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
         header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
         header.extend(pax_relapath_extended);
@@ -301,8 +301,8 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
-    header.extend(ustar_uname.unwrap_or(vec![0; 8])); //TODO: UID Name
-    header.extend(ustar_gname.unwrap_or(vec![0; 8])); //TODO: GID Name
+    header.extend(ustar_uname.unwrap_or(vec![0; 32])); //TODO: UID Name
+    header.extend(ustar_gname.unwrap_or(vec![0; 32])); //TODO: GID Name
     header.extend(format_gnu_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
     header.extend(format_gnu_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
     header.extend(relapath_extended);
@@ -316,32 +316,35 @@ pub fn pax_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
 /// On PAX format volumes, a `TarLabel` is interpreted as a global extended
 /// header (type flag 'g') and written as such.
 pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
-    let label_path = path::PathBuf::from(format!("/tmp/GlobalHead.{}.{}", tarlabel.nabla, tarlabel.volume_identifier.unwrap_or(0)));
+    let label_path = path::PathBuf::from(format!("/tmp/GlobalHead.{}.{}", tarlabel.nabla, tarlabel.volume_identifier.unwrap_or(0).checked_sub(1).unwrap_or(0)));
     let mut extended_stream : Vec<u8> = Vec::with_capacity(512);
 
     if let Some(ref label_str) = tarlabel.label {
         extended_stream.extend(format_pax_attribute("GNU.volume.label", &label_str));
     }
 
-    if let Some(ref recovery_path) = tarlabel.recovery_path {
-        if let Some(recovery_file_type) = tarlabel.recovery_file_type {
+    if let Some(recovery_file_type) = tarlabel.recovery_file_type {
+        if let Some(ref recovery_path) = tarlabel.recovery_path {
             let canonical_recovery_path = canonicalized_tar_path(&recovery_path.clone(), recovery_file_type);
             extended_stream.extend(format_pax_attribute("GNU.volume.filename", &canonical_recovery_path));
         }
-    }
-
-    if let Some(recovery_total_size) = tarlabel.recovery_total_size {
-        extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_total_size)));
-    }
-
-    if let Some(recovery_seek_offset) = tarlabel.recovery_seek_offset {
-        extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
+        
+        if let Some(recovery_remaining_size) = tarlabel.recovery_remaining_size {
+            extended_stream.extend(format_pax_attribute("GNU.volume.size", &format!("{}", recovery_remaining_size)));
+        }
+        
+        if let Some(recovery_seek_offset) = tarlabel.recovery_seek_offset {
+            extended_stream.extend(format_pax_attribute("GNU.volume.offset", &format!("{}", recovery_seek_offset)));
+        }
     }
 
     if extended_stream.len() > 0 {
-        let mut label = Vec::with_capacity(512 * extended_stream.len());
+        let mut label = Vec::with_capacity(512 + extended_stream.len());
 
         let (relapath_unix, relapath_extended, _) = format_pax_legacy_filename(&canonicalized_tar_path(&label_path, TarFileType::FileStream))?;
+
+        assert_eq!(relapath_unix.len(), 100);
+        assert_eq!(relapath_extended.len(), 155);
 
         label.extend(relapath_unix);
         label.extend(format_gnu_numeral(0o644, 8).ok_or(io::Error::new(io::ErrorKind::InvalidData, "UNIX mode is too long"))?); //mode
@@ -354,8 +357,8 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
         label.extend(vec![0; 100]); //Link name
         label.extend("ustar\0".as_bytes()); //magic 'ustar\0'
         label.extend("00".as_bytes()); //version 00
-        label.extend(vec![0; 8]); //UID Name
-        label.extend(vec![0; 8]); //GID Name
+        label.extend(vec![0; 32]); //UID Name
+        label.extend(vec![0; 32]); //GID Name
         label.extend(vec![0; 8]); //Device Major
         label.extend(vec![0; 8]); //Device Minor
         label.extend(relapath_extended);
@@ -367,7 +370,7 @@ pub fn pax_label(tarlabel: &TarLabel) -> io::Result<Vec<u8>> {
         }
 
         label.extend(extended_stream);
-        
+
         Ok(label)
     } else {
         Ok(Vec::with_capacity(0))

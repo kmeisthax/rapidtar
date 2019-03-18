@@ -118,8 +118,8 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     header.extend(vec![0; 100]); //TODO: Link name
     header.extend("ustar\0".as_bytes()); //magic 'ustar\0'
     header.extend("00".as_bytes()); //version 00
-    header.extend(format_tar_string(&tarheader.unix_uname, 32).unwrap_or(vec![0; 8])); //TODO: UID Name
-    header.extend(format_tar_string(&tarheader.unix_gname, 32).unwrap_or(vec![0; 8])); //TODO: GID Name
+    header.extend(format_tar_string(&tarheader.unix_uname, 32).unwrap_or(vec![0; 32])); //TODO: UID Name
+    header.extend(format_tar_string(&tarheader.unix_gname, 32).unwrap_or(vec![0; 32])); //TODO: GID Name
     header.extend(format_tar_numeral(tarheader.unix_devmajor, 8).unwrap_or(vec![0; 8])); //TODO: Device Major
     header.extend(format_tar_numeral(tarheader.unix_devminor, 8).unwrap_or(vec![0; 8])); //TODO: Device Minor
     header.extend(relapath_extended);

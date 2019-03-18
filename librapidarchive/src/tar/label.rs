@@ -1,7 +1,7 @@
 //! Code dealing with global headers, which we call labels.
 
 use std::{io, fs, process, path, cmp};
-use crate::tar::{header, pax, recovery};
+use crate::tar::{header, pax, recovery, ustar};
 use crate::{normalize, spanning};
 use crate::fs as rapidtar_fs;
 
@@ -17,7 +17,7 @@ pub struct TarLabel {
     //than the file header, so we need to account for that
     pub recovery_path: Option<Box<path::PathBuf>>,
     pub recovery_file_type: Option<header::TarFileType>,
-    pub recovery_total_size: Option<u64>,
+    pub recovery_remaining_size: Option<u64>,
     pub recovery_seek_offset: Option<u64>,
 }
 
@@ -29,7 +29,7 @@ impl Default for TarLabel {
             volume_identifier: None,
             recovery_path: None,
             recovery_file_type: None,
-            recovery_total_size: None,
+            recovery_remaining_size: None,
             recovery_seek_offset: None
         }
     }
@@ -45,7 +45,9 @@ impl TarLabel {
 
             label.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
             label.recovery_file_type = Some(rapidtar_fs::get_file_type(&metadata)?);
-            label.recovery_total_size = Some(metadata.len());
+
+            //TODO: We need to subtract *all* of the remaining data in the case of files that get split multiple times across multiple volumes
+            label.recovery_remaining_size = Some(metadata.len().checked_sub(offset).unwrap_or(0));
             label.recovery_seek_offset = Some(cmp::min(offset, metadata.len()));
         }
 
@@ -57,7 +59,10 @@ pub fn labelgen(format: header::TarFormat, tarlabel: &TarLabel) -> io::Result<Ve
     match format {
         header::TarFormat::POSIX => {
             let mut serial_label = pax::pax_label(tarlabel)?;
-            pax::checksum_header(&mut serial_label);
+
+            if serial_label.len() > 512 {
+                ustar::checksum_header(&mut serial_label[0..512]);
+            }
 
             Ok(serial_label)
         },

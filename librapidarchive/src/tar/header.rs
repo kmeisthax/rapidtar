@@ -82,7 +82,7 @@ pub struct TarHeader {
     pub atime: Option<time::SystemTime>,
     pub birthtime: Option<time::SystemTime>,
     pub recovery_path: Option<Box<path::PathBuf>>,
-    pub recovery_total_size: Option<u64>,
+    pub recovery_remaining_size: Option<u64>,
     pub recovery_seek_offset: Option<u64>,
 }
 
@@ -113,7 +113,7 @@ impl TarHeader {
             birthtime: entry_metadata.created().ok(),
 
             recovery_path: None,
-            recovery_total_size: None,
+            recovery_remaining_size: None,
             recovery_seek_offset: None
         })
     }
@@ -125,7 +125,7 @@ impl TarHeader {
             let offset = zone.committed_length.checked_sub(ident.header_length).unwrap_or(0);
 
             recovery_header.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
-            recovery_header.recovery_total_size = Some(entry_metadata.len());
+            recovery_header.recovery_remaining_size = Some(entry_metadata.len());
             recovery_header.recovery_seek_offset = Some(cmp::min(offset, recovery_header.file_size));
             recovery_header.file_size = recovery_header.file_size.checked_sub(offset).unwrap_or(0);
         }
