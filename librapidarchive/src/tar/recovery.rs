@@ -104,7 +104,7 @@ pub fn recover_data(sink: &mut ArchivalSink<RecoveryEntry>, format: TarFormat, l
             let new_ident = RecoveryEntry::new(&ident.original_path.as_ref(), &ident.canonical_path.as_ref(), concrete_tarheader.len() as u64);
             
             outstanding_entry = Some(new_ident.clone());
-            sink.begin_data_zone(new_ident);
+            sink.resume_data_zone(new_ident, zone.committed_length.checked_sub(ident.header_length).unwrap_or(0));
 
             if let Err(_) = sink.write_all(&concrete_tarheader) {
                 break;

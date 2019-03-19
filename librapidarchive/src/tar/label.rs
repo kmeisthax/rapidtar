@@ -45,8 +45,7 @@ impl TarLabel {
 
             label.recovery_path = Some(Box::new(normalize::normalize(&ident.original_path.as_ref())));
             label.recovery_file_type = Some(rapidtar_fs::get_file_type(&metadata)?);
-
-            //TODO: We need to subtract *all* of the remaining data in the case of files that get split multiple times across multiple volumes
+            
             label.recovery_remaining_size = Some(metadata.len().checked_sub(offset).unwrap_or(0));
             label.recovery_seek_offset = Some(cmp::min(offset, metadata.len()));
         }
