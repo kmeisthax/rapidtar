@@ -15,7 +15,7 @@ edition = '2018'
 [dependencies]
 rayon = "1.0.3"
 argparse = "0.2.2"
-librapidarchive = { path = "../librapidarchive" }
+librapidarchive = { version = "0.2.0", path = "../librapidarchive" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
