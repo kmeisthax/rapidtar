@@ -1,7 +1,7 @@
 [package]
 name = "rapidtar"
 description = "Multithreaded file archival utility"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["David Wendt"]
 repository = "https://github.com/kmeisthax/rapidtar"
 
@@ -15,7 +15,7 @@ edition = '2018'
 [dependencies]
 rayon = "1.0.3"
 argparse = "0.2.2"
-librapidarchive = { version = "0.2.0", path = "../librapidarchive" }
+librapidarchive = { version = "0.3.0", path = "../librapidarchive" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ['winbase', 'handleapi', 'winerror'] }
