@@ -152,27 +152,58 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     Ok(header)
 }
 
+pub fn ustar_checksum(header: &[u8]) -> Option<u64> {
+    let mut checksum : u64 = 0;
+
+    for i in 0..148 {
+        checksum += *header.get(i)? as u64;
+    }
+
+    for i in 148..156 {
+        checksum += ' ' as u64;
+    }
+
+    for i in 156..512 {
+        checksum += *header.get(i)? as u64;
+    }
+
+    Some(checksum)
+}
+
 /// Given a tar header (ustar format), calculate a valid checksum.
 /// 
 /// Any existing data in the header checksum field will be destroyed.
 /// 
 /// Attempting to checksum an empty header fails silently.
 pub fn checksum_header(header: &mut [u8]) {
-    if header.len() < 157 {
+    if header.len() < 512 {
         return;
     }
-
-    let mut checksum : u64 = 0;
     
-    header[148..156].clone_from_slice("        ".as_bytes());
-    
-    for byte in header.iter() {
-        checksum += *byte as u64;
-    }
+    let checksum = ustar_checksum(header).unwrap();
     
     if let Some(checksum_val) = format_tar_numeral(checksum & 0o777777, 7) {
         header[148..155].clone_from_slice(&checksum_val);
     }
+}
+
+/// Given a tar header (ustar format), verify the validity of the checksum.
+///
+/// This function returns true iff the sum of all non-checksum bytes, plus
+/// eight ASCII space bytes, equals the value of the
+pub fn verify_header(header: &[u8]) -> bool {
+    let claimed_checksum = parse_tar_numeral(&header[148..156]);
+    let mut calculated_checksum = ustar_checksum(header);
+
+    if let None = claimed_checksum {
+        return false;
+    }
+
+    if let None = calculated_checksum {
+        return false;
+    }
+
+    return claimed_checksum == calculated_checksum;
 }
 
 #[cfg(test)]
