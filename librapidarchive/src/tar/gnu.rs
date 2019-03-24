@@ -1,10 +1,13 @@
 //! Support for GNU extensions to the tar header format.
 
 use std::{io, time, fmt};
+use std::ops::{BitAnd, AddAssign};
 use pad::{PadStr, Alignment};
 use num;
-use num::ToPrimitive;
+use num::{ToPrimitive, FromPrimitive, CheckedSub};
 use num_traits;
+use num_traits::{CheckedShr, CheckedShl};
+use crate::tar::ustar::parse_tar_numeral;
 
 /// Format a number in GNU/STAR octal/integer hybrid format.
 /// 
@@ -18,7 +21,7 @@ use num_traits;
 /// 
 /// In the event that the number cannot be represented in even this form, the
 /// function yields None.
-pub fn format_gnu_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + num::traits::CheckedShr + std::ops::BitAnd + num_traits::cast::ToPrimitive + From<u8>, <N as std::ops::BitAnd>::Output: num_traits::cast::ToPrimitive {
+pub fn format_gnu_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + CheckedShr + BitAnd + ToPrimitive + From<u8>, <N as BitAnd>::Output: ToPrimitive {
     let numsize = number.to_f32()?.log(8.0);
     let gnusize = number.to_f32()?.log(256.0);
     
@@ -46,6 +49,24 @@ pub fn format_gnu_numeral<N: num::Integer>(number: N, field_size: usize) -> Opti
     }
 }
 
+pub fn parse_gnu_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: CheckedShl + AddAssign + FromPrimitive + CheckedSub + Clone + ToPrimitive + fmt::Debug {
+    if field[0] == 0x80 {
+        let mut accum = N::from_u8(0)?;
+        let mut shift = N::from_u8(0)?;
+
+        for i in (1..field.len()).rev() {
+
+            dbg!(&shift);
+            accum += N::from(N::from_u8(field[i])?.checked_shl(shift.to_u32()?)?);
+            shift += N::from_u16(8)?;
+        }
+        
+        Some(accum)
+    } else {
+        parse_tar_numeral(field)
+    }
+}
+
 pub fn format_gnu_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
     match dirtime.duration_since(time::UNIX_EPOCH) {
         Ok(unix_duration) => format_gnu_numeral(unix_duration.as_secs(), 12).ok_or(io::Error::new(io::ErrorKind::InvalidData, "Tar numeral too large")),
@@ -55,7 +76,7 @@ pub fn format_gnu_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::tar::gnu::{format_gnu_numeral};
+    use crate::tar::gnu::{format_gnu_numeral, parse_gnu_numeral};
     
     #[test]
     fn format_gnu_numeral_8() {
@@ -79,5 +100,37 @@ mod tests {
             Some(_) => false,
             None => true
         });
+    }
+
+    #[test]
+    fn parse_gnu_numeral_short() {
+        let test_val = "000100\0";
+        let parsed = parse_gnu_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(0o100), parsed);
+    }
+
+    #[test]
+    fn parse_gnu_numeral_short256() {
+        let test_val = vec![0x80, 0x35, 0x61, 0x31, 0x31, 0x30, 0x33, 0x30];
+        let parsed : Option<u64> = parse_gnu_numeral(&test_val);
+
+        assert_eq!(Some(0x35613131303330), parsed);
+    }
+
+    #[test]
+    fn parse_gnu_numeral_long() {
+        let test_val = "12370000100\0";
+        let parsed = parse_gnu_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(0o12370000100), parsed);
+    }
+
+    #[test]
+    fn parse_gnu_numeral_long256() {
+        let test_val = vec![0x80, 0x30, 0xFF, 0x70, 0x21, 0x35, 0x61, 0x31, 0x31, 0x30, 0x33, 0x30];
+        let parsed : Option<u128> = parse_gnu_numeral(&test_val);
+
+        assert_eq!(Some(0x30FF702135613131303330), parsed);
     }
 }

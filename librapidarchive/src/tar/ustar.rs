@@ -1,18 +1,20 @@
 //! Implementation of the UNIX Standard tar format, aka USTAR.
 
 use std::{io, path, time, fmt};
-use std::ops::{Shl, AddAssign};
+use std::ops::{AddAssign};
 use pad::{PadStr, Alignment};
 use crate::tar::pax;
 use crate::tar::header::{TarHeader, TarFileType};
 use crate::tar::canonicalized_tar_path;
 use num;
+use num::{ToPrimitive, FromPrimitive, CheckedSub};
 use num_traits;
+use num_traits::CheckedShl;
 
 /// Format a number in tar octal format, with a trailing null.
 /// 
 /// If the number is too large to fit, this function yields None.
-pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + num_traits::cast::ToPrimitive {
+pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Option<Vec<u8>> where N: fmt::Octal + ToPrimitive {
     let numsize = number.to_f32()?.log(8.0);
     
     if numsize >= (field_size as f32 - 1.0) {
@@ -30,7 +32,7 @@ pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Opti
 ///
 /// If thie number isn't valid octal, or is missing a trailing null, this
 /// function yields None.
-pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Shl + AddAssign + num::FromPrimitive + num::CheckedSub + From<<N as Shl>::Output> + Clone {
+pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: CheckedShl + AddAssign + FromPrimitive + CheckedSub + Clone + ToPrimitive {
     let mut accum = N::from_u8(0)?;
     let mut octet;
     let mut shift = N::from_u8(0)?;
@@ -46,7 +48,7 @@ pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Sh
             return None;
         }
 
-        accum += N::from(octet << shift.clone());
+        accum += N::from(octet.checked_shl(shift.to_u32()?)?);
         shift += N::from_u8(3)?;
     }
 
