@@ -26,6 +26,10 @@ pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Opti
     }
 }
 
+/// Parse a numeral in tar octal format.
+///
+/// If thie number isn't valid octal, or is missing a trailing null, this
+/// function yields None.
 pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Shl + AddAssign + num::FromPrimitive + num::CheckedSub + From<<N as Shl>::Output> + Clone {
     let mut accum = N::from_u8(0)?;
     let mut octet;
@@ -152,6 +156,19 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     Ok(header)
 }
 
+/// Calculate the checksum for a given encoded tar header.
+///
+/// This function yields None if the header is not the correct length.
+///
+/// The checksum is calculated as if the header checksum field [148..156] bytes
+/// were ASCII spaces. This matches the tar algorithm and allows this function
+/// to be used for both checksum generation and verification. See
+/// [`checksum_header`] for how to generate a checksum for a header, and
+/// [`verify_header`] for how to verify the data in a header against the
+/// checksum field.
+///
+/// [`checksum_header`]: ./fn.checksum_header.html
+/// [`verify_header`]: ./fn.verify_header.html
 pub fn ustar_checksum(header: &[u8]) -> Option<u64> {
     let mut checksum : u64 = 0;
 
@@ -159,7 +176,7 @@ pub fn ustar_checksum(header: &[u8]) -> Option<u64> {
         checksum += *header.get(i)? as u64;
     }
 
-    for i in 148..156 {
+    for _ in 148..156 {
         checksum += ' ' as u64;
     }
 
@@ -193,7 +210,7 @@ pub fn checksum_header(header: &mut [u8]) {
 /// eight ASCII space bytes, equals the value of the
 pub fn verify_header(header: &[u8]) -> bool {
     let claimed_checksum = parse_tar_numeral(&header[148..156]);
-    let mut calculated_checksum = ustar_checksum(header);
+    let calculated_checksum = ustar_checksum(header);
 
     if let None = claimed_checksum {
         return false;
