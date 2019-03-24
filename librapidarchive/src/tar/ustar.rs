@@ -1,6 +1,7 @@
 //! Implementation of the UNIX Standard tar format, aka USTAR.
 
 use std::{io, path, time, fmt};
+use std::ops::{Shl, AddAssign};
 use pad::{PadStr, Alignment};
 use crate::tar::pax;
 use crate::tar::header::{TarHeader, TarFileType};
@@ -23,6 +24,29 @@ pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Opti
         
         Some(value)
     }
+}
+
+pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Shl + AddAssign + num::FromPrimitive + num::CheckedSub + From<<N as Shl>::Output> + Clone {
+    let mut accum = N::from_u8(0)?;
+    let mut octet;
+    let mut shift = N::from_u8(0)?;
+
+    if field[field.len() - 1] != 0 {
+        return None;
+    }
+
+    for i in (0..field.len()-1).rev() {
+        octet = N::from_u8(field[i])?;
+        octet = octet.checked_sub(&N::from_u8('0' as u8)?)?;
+        if octet > N::from_u8(7)? {
+            return None;
+        }
+
+        accum += N::from(octet << shift.clone());
+        shift += N::from_u8(3)?;
+    }
+
+    Some(accum)
 }
 
 pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
@@ -153,7 +177,7 @@ pub fn checksum_header(header: &mut [u8]) {
 
 #[cfg(test)]
 mod tests {
-    use crate::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
+    use crate::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename, parse_tar_numeral};
     use crate::tar::header::TarFileType;
     use std::{io, path};
     
@@ -207,5 +231,45 @@ mod tests {
         let my_err = format_tar_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap_err();
         
         assert_eq!(my_err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn parse_tar_numeral_short() {
+        let test_val = "000100\0";
+        let parsed = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(64), parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_long() {
+        let test_val = "7654321076543210\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(275730608604808), parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_missing_sep() {
+        let test_val = "7654321076543210";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_highnum() {
+        let test_val = "765432108654321\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_nonnum() {
+        let test_val = "7654 32108654321\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
     }
 }
