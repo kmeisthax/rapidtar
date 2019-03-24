@@ -6,25 +6,6 @@ use num;
 use num::ToPrimitive;
 use num_traits;
 
-/* Fun fact: This is how GNU tar generates multivolume headers:
-
-
-      xheader_store ("GNU.volume.filename", &dummy, map->file_name);
-      xheader_store ("GNU.volume.size", &dummy, &map->sizeleft);
-      xheader_store ("GNU.volume.offset", &dummy, &d);
-      
-      
-    Effectively, GNU.volume.filename is the name of the file we're resuming.
-    (The fallback filename is directory/GNUFileParts.nabla/file.partnum, which
-    is exposed to both ustar and pax name fields. If you're GNU tar this field
-    supercedes the name, in the same way PAX names supercede USTar names...)
-    
-    GNU.volume.size is the remaining file size we expect to write
-    (I'm not sure why this is needed? pax already has the file size bit...)
-    
-    GNU.volume.offset is how far in the file we're restarting from.
-*/
-
 /// Format a number in GNU/STAR octal/integer hybrid format.
 /// 
 /// For numerals whose tar numeral representation is smaller than the given

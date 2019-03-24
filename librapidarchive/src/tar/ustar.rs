@@ -1,6 +1,7 @@
 //! Implementation of the UNIX Standard tar format, aka USTAR.
 
 use std::{io, path, time, fmt};
+use std::ops::{Shl, AddAssign};
 use pad::{PadStr, Alignment};
 use crate::tar::pax;
 use crate::tar::header::{TarHeader, TarFileType};
@@ -23,6 +24,33 @@ pub fn format_tar_numeral<N: num::Integer>(number: N, field_size: usize) -> Opti
         
         Some(value)
     }
+}
+
+/// Parse a numeral in tar octal format.
+///
+/// If thie number isn't valid octal, or is missing a trailing null, this
+/// function yields None.
+pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Shl + AddAssign + num::FromPrimitive + num::CheckedSub + From<<N as Shl>::Output> + Clone {
+    let mut accum = N::from_u8(0)?;
+    let mut octet;
+    let mut shift = N::from_u8(0)?;
+
+    if field[field.len() - 1] != 0 {
+        return None;
+    }
+
+    for i in (0..field.len()-1).rev() {
+        octet = N::from_u8(field[i])?;
+        octet = octet.checked_sub(&N::from_u8('0' as u8)?)?;
+        if octet > N::from_u8(7)? {
+            return None;
+        }
+
+        accum += N::from(octet << shift.clone());
+        shift += N::from_u8(3)?;
+    }
+
+    Some(accum)
 }
 
 pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
@@ -128,32 +156,76 @@ pub fn ustar_header(tarheader: &TarHeader) -> io::Result<Vec<u8>> {
     Ok(header)
 }
 
+/// Calculate the checksum for a given encoded tar header.
+///
+/// This function yields None if the header is not the correct length.
+///
+/// The checksum is calculated as if the header checksum field [148..156] bytes
+/// were ASCII spaces. This matches the tar algorithm and allows this function
+/// to be used for both checksum generation and verification. See
+/// [`checksum_header`] for how to generate a checksum for a header, and
+/// [`verify_header`] for how to verify the data in a header against the
+/// checksum field.
+///
+/// [`checksum_header`]: ./fn.checksum_header.html
+/// [`verify_header`]: ./fn.verify_header.html
+pub fn ustar_checksum(header: &[u8]) -> Option<u64> {
+    let mut checksum : u64 = 0;
+
+    for i in 0..148 {
+        checksum += *header.get(i)? as u64;
+    }
+
+    for _ in 148..156 {
+        checksum += ' ' as u64;
+    }
+
+    for i in 156..512 {
+        checksum += *header.get(i)? as u64;
+    }
+
+    Some(checksum)
+}
+
 /// Given a tar header (ustar format), calculate a valid checksum.
 /// 
 /// Any existing data in the header checksum field will be destroyed.
 /// 
 /// Attempting to checksum an empty header fails silently.
 pub fn checksum_header(header: &mut [u8]) {
-    if header.len() < 157 {
+    if header.len() < 512 {
         return;
     }
-
-    let mut checksum : u64 = 0;
     
-    header[148..156].clone_from_slice("        ".as_bytes());
-    
-    for byte in header.iter() {
-        checksum += *byte as u64;
-    }
+    let checksum = ustar_checksum(header).unwrap();
     
     if let Some(checksum_val) = format_tar_numeral(checksum & 0o777777, 7) {
         header[148..155].clone_from_slice(&checksum_val);
     }
 }
 
+/// Given a tar header (ustar format), verify the validity of the checksum.
+///
+/// This function returns true iff the sum of all non-checksum bytes, plus
+/// eight ASCII space bytes, equals the value of the
+pub fn verify_header(header: &[u8]) -> bool {
+    let claimed_checksum = parse_tar_numeral(&header[148..156]);
+    let calculated_checksum = ustar_checksum(header);
+
+    if let None = claimed_checksum {
+        return false;
+    }
+
+    if let None = calculated_checksum {
+        return false;
+    }
+
+    return claimed_checksum == calculated_checksum;
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename};
+    use crate::tar::ustar::{format_tar_numeral, format_tar_string, format_tar_filename, parse_tar_numeral};
     use crate::tar::header::TarFileType;
     use std::{io, path};
     
@@ -207,5 +279,45 @@ mod tests {
         let my_err = format_tar_filename(path::Path::new("1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/1/2/3/4/5/6/7/8/9/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z/aa/ab/ac/ad/ae/af/ag/ah/ai/aj/ak/quux"), TarFileType::FileStream).unwrap_err();
         
         assert_eq!(my_err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn parse_tar_numeral_short() {
+        let test_val = "000100\0";
+        let parsed = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(64), parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_long() {
+        let test_val = "7654321076543210\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(Some(275730608604808), parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_missing_sep() {
+        let test_val = "7654321076543210";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_highnum() {
+        let test_val = "765432108654321\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
+    }
+
+    #[test]
+    fn parse_tar_numeral_invalid_nonnum() {
+        let test_val = "7654 32108654321\0";
+        let parsed : Option<u64> = parse_tar_numeral(test_val.as_bytes());
+
+        assert_eq!(None, parsed);
     }
 }
