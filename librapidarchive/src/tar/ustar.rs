@@ -2,6 +2,7 @@
 
 use std::{io, path, time, fmt};
 use std::ops::{AddAssign};
+use std::str::from_utf8;
 use pad::{PadStr, Alignment};
 use crate::tar::pax;
 use crate::tar::header::{TarHeader, TarFileType};
@@ -55,6 +56,13 @@ pub fn parse_tar_numeral<N: num::Integer>(field: &[u8]) -> Option<N> where N: Ch
     Some(accum)
 }
 
+/// Given a string, format it as a tar string.
+/// 
+/// This function yields null if the string is too large to fit in the field. It
+/// does not support truncation.
+/// 
+/// TODO: This function encodes strings as UTF-8, which is probably incorrect
+/// for the tar format, but w/e
 pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>> {
     if the_string.len() < field_size {
         let mut result = Vec::with_capacity(field_size);
@@ -66,6 +74,16 @@ pub fn format_tar_string(the_string: &str, field_size: usize) -> Option<Vec<u8>>
     } else {
         None
     }
+}
+
+/// Given bytes, parse them as a tar string.
+/// 
+/// This function yields null if the bytes do not form a valid UTF-8 sequence.
+/// 
+/// TODO: This function accepts strings encoded as UTF-8, which is probably
+/// incorrect for the tar format, but w/e
+pub fn parse_tar_string(field: &[u8]) -> Option<String> {
+    Some(String::from(from_utf8(field).ok()?))
 }
 
 fn format_tar_time(dirtime: &time::SystemTime) -> io::Result<Vec<u8>> {
